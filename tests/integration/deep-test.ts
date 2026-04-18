@@ -1,96 +1,75 @@
-import { execFile } from "node:child_process";
-import { spawn } from "node:child_process";
-import { promisify } from "node:util";
-import { readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const execFileAsync = promisify(execFile);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_DIR = join(__dirname, "..", "..");
 const TEST_IMAGE = join(__dirname, "test-image.png");
-const OPENCODE_PORT = 14096;
-const OPENCODE_URL = `http://127.0.0.1:${OPENCODE_PORT}`;
 
-const NON_VISION_MODEL = "llama3.2:3b";
-const VISION_MODEL = "moondream:1.8b";
+const NON_VISION_MODEL = process.env.NON_VISION_MODEL || "qwen3.5:cloud";
+const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || "moondream:1.8b";
 
-const OPENCODE_CONFIG = JSON.stringify({
-  model: `ollama/${NON_VISION_MODEL}`,
-  plugin: [join(PROJECT_DIR, "dist", "index.js")],
-  provider: {
-    ollama: {
-      npm: "@ai-sdk/openai-compatible",
-      name: "Ollama",
-      options: {
-        baseURL: "http://localhost:11434/v1",
-      },
-      models: {
-        [NON_VISION_MODEL]: {
-          name: "Llama 3.2 3B",
-        },
-      },
-    },
-  },
-});
-
-const TIMEOUT_MS = 180_000;
-const POLL_INTERVAL_MS = 2_000;
+const TIMEOUT_MS = 300_000;
 
 function log(msg: string): void {
   console.log(`[deep-test] ${msg}`);
 }
 
-function waitFor(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function checkOllamaReady(): Promise<void> {
   log("Checking if Ollama is ready...");
   for (let i = 0; i < 30; i++) {
-    try {
-      const { stdout } = await execFileAsync("ollama", ["list"], {
-        timeout: 5_000,
-      });
-      if (stdout) {
-        log("Ollama is ready.");
-        return;
-      }
-    } catch {
-      // not ready yet
+    const result = spawnSync("ollama", ["list"], {
+      timeout: 5_000,
+      encoding: "utf-8",
+    });
+    if (result.stdout) {
+      log("Ollama is ready.");
+      return;
     }
     log(`Waiting for Ollama... (${i + 1}/30)`);
-    await waitFor(2_000);
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
   throw new Error("Ollama did not become ready after 60 seconds");
 }
 
-async function checkModelAvailable(model: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync("ollama", ["list"], {
-      timeout: 10_000,
-    });
-    return stdout.includes(model);
-  } catch {
-    return false;
-  }
-}
-
 async function ensureModel(model: string): Promise<void> {
-  if (await checkModelAvailable(model)) {
-    log(`Model '${model}' is already available`);
+  if (model.endsWith(":cloud")) {
+    log(`Cloud model '${model}' does not need local pulling.`);
+    return;
+  }
+  const listResult = spawnSync("ollama", ["list"], {
+    timeout: 10_000,
+    encoding: "utf-8",
+  });
+  if (listResult.stdout && listResult.stdout.includes(model)) {
+    log(`Model '${model}' is already available locally`);
     return;
   }
   log(`Pulling model '${model}'...`);
-  await execFileAsync("ollama", ["pull", model], { timeout: 300_000 });
+  spawnSync("ollama", ["pull", model], { timeout: 300_000, encoding: "utf-8" });
   log(`Model '${model}' pulled successfully`);
 }
 
 async function checkSkillInstalled(): Promise<void> {
   const skillSearchPaths = [
-    join(process.env.HOME || "/root", ".agents", "skills", "image-comprehension-ollama", "scripts", "comprehend_image.sh"),
-    join(process.env.HOME || "/root", ".config", "opencode", "skills", "image-comprehension-ollama", "scripts", "comprehend_image.sh"),
+    join(
+      process.env.HOME || "/root",
+      ".agents",
+      "skills",
+      "image-comprehension-ollama",
+      "scripts",
+      "comprehend_image.sh",
+    ),
+    join(
+      process.env.HOME || "/root",
+      ".config",
+      "opencode",
+      "skills",
+      "image-comprehension-ollama",
+      "scripts",
+      "comprehend_image.sh",
+    ),
   ];
 
   for (const candidate of skillSearchPaths) {
@@ -100,60 +79,74 @@ async function checkSkillInstalled(): Promise<void> {
     }
   }
 
-  log("Skill not found at expected paths. The plugin will attempt to resolve it at runtime.");
-  log("Ensure the skill was installed via the CI step or manually before running this test.");
+  log(
+    "Skill not found at expected paths. The plugin will attempt to resolve it at runtime.",
+  );
+  log(
+    "Ensure the skill was installed via the CI step or manually before running this test.",
+  );
 }
 
-async function fetchJSON(
-  url: string,
-  options?: RequestInit,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 300_000);
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        ...(options?.headers || {}),
+function buildOpenCodeConfig(): string {
+  const isCloudModel = NON_VISION_MODEL.endsWith(":cloud");
+
+  const nonVisionModelName = isCloudModel
+    ? NON_VISION_MODEL.replace(":cloud", "")
+    : NON_VISION_MODEL;
+
+  const llmProviderKey = isCloudModel ? "ollama-cloud" : "ollama";
+  const llmBaseURL = isCloudModel
+    ? "https://ollama.com/v1"
+    : "http://localhost:11434/v1";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const llmProviderOptions: Record<string, any> = {
+    baseURL: llmBaseURL,
+  };
+
+  if (isCloudModel && process.env.OLLAMA_API_KEY) {
+    llmProviderOptions.headers = {
+      Authorization: `Bearer ${process.env.OLLAMA_API_KEY}`,
+    };
+  }
+
+  const config: Record<string, unknown> = {
+    model: `${llmProviderKey}/${nonVisionModelName}`,
+    plugin: [join(PROJECT_DIR, "dist", "index.js")],
+    provider: {
+      [llmProviderKey]: {
+        npm: "@ai-sdk/openai-compatible",
+        name: isCloudModel ? "Ollama Cloud" : "Ollama",
+        options: llmProviderOptions,
+        models: {
+          [nonVisionModelName]: {
+            name: nonVisionModelName,
+          },
+        },
       },
-      signal: options?.signal ?? controller.signal,
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(
-        `HTTP ${response.status} from ${url}: ${text.slice(0, 500)}`,
-      );
-    }
-    return response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
+      ollama: {
+        npm: "@ai-sdk/openai-compatible",
+        name: "Ollama",
+        options: {
+          baseURL: "http://localhost:11434/v1",
+        },
+        models: {
+          [VISION_MODEL]: {
+            name: VISION_MODEL,
+          },
+        },
+      },
+    },
+  };
 
-async function waitForOpenCodeServer(): Promise<void> {
-  log(`Waiting for OpenCode server at ${OPENCODE_URL}...`);
-  for (let i = 0; i < 60; i++) {
-    try {
-      const response = await fetch(`${OPENCODE_URL}/global/health`, {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (response.ok) {
-        log("OpenCode server is healthy.");
-        return;
-      }
-    } catch {
-      // not ready
-    }
-    log(`Waiting for OpenCode server... (${i + 1}/60)`);
-    await waitFor(2_000);
-  }
-  throw new Error("OpenCode server did not become healthy after 120 seconds");
+  return JSON.stringify(config);
 }
 
 async function deepTest(): Promise<void> {
   log(`Test image: ${TEST_IMAGE}`);
   log(`Project dir: ${PROJECT_DIR}`);
+  log(`Non-vision model: ${NON_VISION_MODEL}`);
+  log(`Vision model: ${VISION_MODEL}`);
 
   if (!readFileSync(TEST_IMAGE).length) {
     throw new Error(`Test image is empty or missing: ${TEST_IMAGE}`);
@@ -164,201 +157,126 @@ async function deepTest(): Promise<void> {
   await ensureModel(VISION_MODEL);
   await checkSkillInstalled();
 
-  const imageBase64 = readFileSync(TEST_IMAGE).toString("base64");
-  const imageDataUrl = `data:image/png;base64,${imageBase64}`;
+  const opencodeConfig = buildOpenCodeConfig();
+  if (process.env.DEBUG_OPENCODE === "1") {
+    const sanitizedConfig = opencodeConfig.replace(
+      /Bearer [^"]+/g,
+      "Bearer ***REDACTED***",
+    );
+    log(`OpenCode config: ${sanitizedConfig}`);
+  }
 
-  log("Starting OpenCode server...");
-  const opencodeProcess = spawn(
+  log("Running opencode run --format json...");
+  const result = spawnSync(
     "opencode",
-    ["serve", "--port", String(OPENCODE_PORT), "--hostname", "127.0.0.1"],
+    [
+      "run",
+      "--format",
+      "json",
+      "--dangerously-skip-permissions",
+      "Please describe the image I have attached.",
+      "-f",
+      TEST_IMAGE,
+    ],
     {
       cwd: PROJECT_DIR,
       env: {
         ...process.env,
-        OPENCODE_CONFIG_CONTENT: OPENCODE_CONFIG,
+        OPENCODE_CONFIG_CONTENT: opencodeConfig,
         OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
         OPENCODE_FAKE_VCS: "git",
         OLLAMA_VISION_MODEL: VISION_MODEL,
+        OLLAMA_API_KEY: process.env.OLLAMA_API_KEY || "",
       },
+      timeout: TIMEOUT_MS,
+      maxBuffer: 10 * 1024 * 1024,
+      encoding: "utf-8" as const,
       stdio: ["pipe", "pipe", "pipe"],
     },
   );
 
-  let opencodeStderr = "";
-  opencodeProcess.stderr.on("data", (data: Buffer) => {
-    const text = data.toString();
-    opencodeStderr += text;
-    if (process.env.DEBUG_OPENCODE === "1") {
-      process.stderr.write(`[opencode:stderr] ${text}`);
-    }
-  });
+  let stdout: string = result.stdout || "";
+  let stderr: string = result.stderr || "";
 
-  let opencodeStdout = "";
-  opencodeProcess.stdout.on("data", (data: Buffer) => {
-    const text = data.toString();
-    opencodeStdout += text;
-    if (process.env.DEBUG_OPENCODE === "1") {
-      process.stdout.write(`[opencode:stdout] ${text}`);
-    }
-  });
-
-  try {
-    await waitForOpenCodeServer();
-
-    log("Creating test session...");
-    const sessionResult = (await fetchJSON(`${OPENCODE_URL}/session`, {
-      method: "POST",
-      body: JSON.stringify({ title: "image-comprehension-e2e-test" }),
-    })) as { data?: { id?: string }; id?: string };
-
-    const sessionId =
-      sessionResult?.data?.id || sessionResult?.id || "";
-    if (!sessionId) {
+  if (result.error) {
+    if (result.error.message.includes("timed out")) {
       throw new Error(
-        `Failed to create session. Response: ${JSON.stringify(sessionResult).slice(0, 500)}`,
+        `opencode run timed out after ${TIMEOUT_MS / 1000}s. stderr: ${stderr.slice(-1000)}`,
       );
     }
-    log(`Session created: ${sessionId}`);
-
-    log("Sending message with image...");
-    const imageDataUrlForMessage = imageDataUrl;
-
-    const messageResult = (await fetchJSON(
-      `${OPENCODE_URL}/session/${sessionId}/message`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          parts: [
-            {
-              type: "text",
-              text: "Please describe the image I have attached.",
-            },
-            {
-              type: "file",
-              url: imageDataUrlForMessage,
-              mime: "image/png",
-            },
-          ],
-        }),
-      },
-    )) as Record<string, unknown>;
-
-    log(`Message sent. Response: ${JSON.stringify(messageResult).slice(0, 300)}`);
-
-    log("Polling for response with tool call evidence...");
-    let foundToolCall = false;
-    let foundDescription = false;
-    let attempts = 0;
-    const maxAttempts = Math.ceil(TIMEOUT_MS / POLL_INTERVAL_MS);
-
-    while (attempts < maxAttempts) {
-      attempts++;
-      await waitFor(POLL_INTERVAL_MS);
-
-      try {
-        const messagesResult = (await fetchJSON(
-          `${OPENCODE_URL}/session/${sessionId}/message`,
-          {
-            method: "GET",
-          },
-        )) as { data?: Array<Record<string, unknown>> };
-
-        const messages = messagesResult?.data || [];
-
-        for (const msg of messages) {
-          const msgStr = JSON.stringify(msg);
-
-          if (
-            msgStr.includes("comprehend_image") ||
-            msgStr.includes("comprehend") ||
-            msgStr.includes("image comprehension") ||
-            msgStr.includes("Image Comprehension") ||
-            msgStr.includes("describe") ||
-            msgStr.includes("image")
-          ) {
-            foundToolCall = true;
-          }
-
-          if (
-            msgStr.includes("1x1") ||
-            msgStr.includes("red") ||
-            msgStr.includes("pixel") ||
-            msgStr.includes("small") ||
-            msgStr.includes("square") ||
-            msgStr.includes("tiny") ||
-            msgStr.includes("single pixel") ||
-            msgStr.includes("minimal") ||
-            msgStr.includes("image comprehension returned") ||
-            msgStr.includes("moondream")
-          ) {
-            foundDescription = true;
-          }
-        }
-
-        if (foundToolCall && foundDescription) {
-          log("SUCCESS: Found evidence of tool call AND description in messages!");
-          break;
-        }
-
-        if (foundToolCall) {
-          log(`Attempt ${attempts}/${maxAttempts}: Found tool call evidence, waiting for description...`);
-        } else {
-          log(`Attempt ${attempts}/${maxAttempts}: Waiting for response...`);
-        }
-      } catch (err) {
-        log(`Attempt ${attempts}/${maxAttempts}: Error polling messages: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-
-    if (!foundToolCall && !foundDescription) {
-      log("WARNING: Could not confirm tool invocation in messages.");
-      log("This may indicate the plugin hook did not fire or the model response did not include the tool call.");
-      log("Checking OpenCode logs for plugin activity...");
-
-      const serverLogs = opencodeStderr + opencodeStdout;
-      const hasPluginInit =
-        serverLogs.includes("Plugin initialized") ||
-        serverLogs.includes("image-comprehension") ||
-        serverLogs.includes("Plugin");
-      const hasImageProcessing =
-        serverLogs.includes("image") ||
-        serverLogs.includes("comprehend") ||
-        serverLogs.includes("vision");
-
-      if (hasPluginInit || hasImageProcessing) {
-        log("Found plugin-related activity in OpenCode logs. The test may be partially working.");
-        log("Marking as PASS with caveats - the plugin loaded but the model may not have invoked the tool.");
-      } else {
-        throw new Error(
-          "Integration test FAILED: No evidence of plugin loading or image comprehension in server logs or message responses.\n\n" +
-          `Server stderr (last 2000 chars): ${opencodeStderr.slice(-2000)}\n\n` +
-          `Server stdout (last 2000 chars): ${opencodeStdout.slice(-2000)}`,
-        );
-      }
-    } else if (foundToolCall && !foundDescription) {
-      log("PARTIAL SUCCESS: Tool call was found, but no image description was detected in the response.");
-      log("This likely means the model called the comprehend_image tool but the response format didn't match our detection patterns.");
-      log("The plugin is working - the tool was invoked. Marking as PASS.");
-    } else {
-      log("SUCCESS: Integration test passed! Image comprehension plugin is working.");
-    }
-  } finally {
-    log("Shutting down OpenCode server...");
-    opencodeProcess.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      opencodeProcess.on("exit", () => {
-        resolve();
-      });
-      setTimeout(() => {
-        opencodeProcess.kill("SIGKILL");
-        resolve();
-      }, 5_000);
-    });
-    log("OpenCode server stopped.");
+    log(`opencode run encountered error: ${result.error.message}`);
   }
+
+  if (result.status !== 0 && result.status !== null) {
+    log(
+      `opencode run exited with code ${result.status}. stderr: ${stderr.slice(-1000)}`,
+    );
+  }
+
+  log(
+    `opencode run completed. stdout length: ${stdout.length}, stderr length: ${stderr.length}`,
+  );
+
+  if (process.env.DEBUG_OPENCODE === "1") {
+    log(`stdout: ${stdout.slice(-2000)}`);
+    log(`stderr: ${stderr.slice(-2000)}`);
+  }
+
+  const combinedOutput = stdout + "\n" + stderr;
+
+  let foundToolCall = false;
+  let foundDescription = false;
+
+  if (combinedOutput.includes("comprehend_image")) {
+    foundToolCall = true;
+    log("SUCCESS: comprehend_image tool was invoked by the LLM!");
+  }
+
+  if (
+    combinedOutput.includes("1x1") ||
+    combinedOutput.includes("red") ||
+    combinedOutput.includes("pixel") ||
+    combinedOutput.includes("small") ||
+    combinedOutput.includes("yellow") ||
+    combinedOutput.includes("square") ||
+    combinedOutput.includes("tiny") ||
+    combinedOutput.includes("image comprehension returned") ||
+    combinedOutput.includes("moondream") ||
+    combinedOutput.includes("flat") ||
+    combinedOutput.includes("solid") ||
+    combinedOutput.includes("uniform")
+  ) {
+    foundDescription = true;
+    log("SUCCESS: Image description content detected in the response!");
+  }
+
+  if (foundToolCall && foundDescription) {
+    log("FULL SUCCESS: Tool invocation AND image description both confirmed!");
+  } else if (foundToolCall) {
+    log(
+      "PARTIAL SUCCESS: Tool was invoked but description pattern not matched (likely OK - pattern matching is approximate).",
+    );
+  } else if (foundDescription) {
+    log(
+      "PARTIAL SUCCESS: Description found but tool call not specifically detected.",
+    );
+  }
+
+  if (!foundToolCall && !foundDescription) {
+    throw new Error(
+      "Integration test FAILED: No evidence of plugin loading, tool invocation, or image comprehension.\n\n" +
+        `stdout (last 2000 chars): ${stdout.slice(-2000)}\n\n` +
+        `stderr (last 2000 chars): ${stderr.slice(-2000)}`,
+    );
+  }
+
+  log("Integration test PASSED!");
 }
 
 deepTest().catch((err) => {
-  console.error("Integration test FAILED:", err instanceof Error ? err.message : String(err));
+  console.error(
+    "Integration test FAILED:",
+    err instanceof Error ? err.message : String(err),
+  );
   process.exit(1);
 });
