@@ -59,12 +59,12 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 - **Integration tests**: `tests/integration/` — full end-to-end tests using OpenCode + Ollama
   - `setup-ci.sh`: Installs Ollama, pulls models, installs the skill
   - `quick-test.sh`: Smoke test — builds plugin, verifies skill and Ollama are reachable
-  - `deep-test.ts`: Integration test — starts `opencode serve`, sends image message, verifies tool invocation
+  - `deep-test.ts`: Integration test — runs `opencode run --format json` with image attachment, verifies tool invocation
   - `test-image.png`: Minimal 1x1 test PNG for integration tests
 - **CI workflows**:
-  - `.github/workflows/ci.yml`: Format check + build (runs on Node 18/20/22, timeout: 10 min)
-  - `.github/workflows/test.yml`: Full integration test with Ollama + OpenCode (timeout: 10 min)
-- **Integration test architecture**: All local — no external API keys needed. Uses `ollama/llama3.2:3b` (non-vision) and `ollama/moondream:1.8b` (vision), both running locally.
+  - `.github/workflows/ci.yml`: Format check + build (runs on Node 20/22/24, timeout: 10 min)
+  - `.github/workflows/test.yml`: Integration test with Ollama Cloud + local vision model (timeout: 15 min)
+- **Integration test architecture**: Uses Ollama Cloud (`qwen3.5:cloud`) for the non-vision LLM (fast, no CPU inference) and local Ollama (`moondream:1.8b`) for vision comprehension. Requires `OLLAMA_CLOUD_APIKEY` GitHub secret. The test uses `opencode run --format json --dangerously-skip-permissions` for simple, reliable end-to-end verification.
 
 ### Pull Request Checklist
 

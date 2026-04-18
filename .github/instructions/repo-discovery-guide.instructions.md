@@ -12,7 +12,7 @@ Use this file like a cache.
 - Prefer updating it when you discover drift (paths, scripts, CI behavior), rather than keeping it perfectly current.
 - Treat the "Last verified" timestamp as the main trust signal; if you only reformat or reorganize text, do not update it.
 
-**Last verified**: 2026-04-17 (updated: added integration test info)
+**Last verified**: 2026-04-18 (updated: integration test now uses Ollama Cloud + opencode run)
 
 ## 1. High-signal docs (read-first index)
 
@@ -28,14 +28,14 @@ Use this file like a cache.
 | Path | Owner / Purpose | Boundary notes |
 |------|-----------------|----------------|
 | `src/index.ts` | **All plugin logic** — single-file architecture. Config loading, image processing, tool registration, message transform hook, Ollama/skill readiness checks | No other source files. Do not split into multiple TS files |
-| `tests/integration/deep-test.ts` | **Integration test** — starts OpenCode serve, sends image, verifies tool invocation | Uses Bun runtime; no unit test framework |
+| `tests/integration/deep-test.ts` | **Integration test** — runs `opencode run --format json`, verifies tool invocation and image description | Uses `spawnSync`; cloud model for LLM, local Ollama for vision |
 | `tests/integration/quick-test.sh` | **Smoke test** — builds plugin, verifies skill and Ollama are reachable | Run manually or in CI |
 | `tests/integration/setup-ci.sh` | **CI setup** — installs Ollama, pulls models, installs skill | Called by `.github/workflows/test.yml` |
 | `tests/integration/test-image.png` | **Test fixture** — minimal 1x1 PNG for integration tests | 70 bytes |
 | `package.json` | npm package definition, scripts, peer deps | `@opencode-ai/plugin` and `@opencode-ai/sdk` are peer deps only |
 | `tsconfig.json` | TypeScript config — ES2022, Node16, strict | |
-| `.github/workflows/ci.yml` | CI: format check + build on Node 18/20/22 | Must complete in under 10 min per `.github/instructions/cicd.instructions.md` |
-| `.github/workflows/test.yml` | Integration test: Ollama + OpenCode + plugin end-to-end | Must complete in under 10 min; no secrets needed; all local models |
+| `.github/workflows/ci.yml` | CI: format check + build on Node 20/22/24 | Must complete in under 10 min per `.github/instructions/cicd.instructions.md` |
+| `.github/workflows/test.yml` | Integration test: Ollama Cloud LLM + local vision model + OpenCode end-to-end | Requires `OLLAMA_CLOUD_APIKEY` secret; timeout 15 min |
 
 ## 3. Runtime entry points
 
@@ -69,22 +69,22 @@ Use this file like a cache.
 | Build | `npm run build` (tsc) | ~3s |
 | **Total** | | **~10s** (well under 10 min limit) |
 
-CI matrix: Node 18, 20, 22 on `ubuntu-latest`. Timeout: 10 minutes.
+CI matrix: Node 20, 22, 24 on `ubuntu-latest`. Timeout: 10 minutes.
 
 ### test.yml — Integration test
 
 | Step | Command | Approx time |
 |------|---------|-------------|
 | Install Ollama | `curl -fsSL https://ollama.com/install.sh \| sh` | ~30s |
-| Start Ollama + pull models | `ollama serve &`, `ollama pull llama3.2:3b`, `ollama pull moondream:1.8b` | ~3 min (cached: ~10s) |
+| Start Ollama + pull vision model | `ollama serve &`, `ollama pull moondream:1.8b` | ~2 min (cached: ~10s) |
 | Install skill | `npx skills add aosama/image-comprehension-ollama` | ~15s |
 | Build plugin | `npm ci && npm run build` | ~10s |
 | Install OpenCode | `npm install -g opencode-ai` | ~15s |
 | Smoke test | Skill script directly with test image | ~30s |
-| Deep test | `npx tsx tests/integration/deep-test.ts` | ~60s |
-| **Total** | | **~5-6 min** (well under 10 min limit) |
+| Deep test | `npx tsx tests/integration/deep-test.ts` (opencode run with cloud LLM) | ~3 min |
+| **Total** | | **~5 min** (well under 15 min limit) |
 
-No API keys or secrets needed. Both models run locally on Ollama. Timeout: 10 minutes.
+Uses `OLLAMA_CLOUD_APIKEY` GitHub secret for the non-vision LLM (Ollama Cloud `qwen3.5:cloud`). Vision model (`moondream:1.8b`) runs locally on the runner. The deep test uses `opencode run --format json --dangerously-skip-permissions` for reliable non-interactive testing.
 
 ## 6. When to update this file
 
