@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "node:http";
 
 const execFileAsync = promisify(execFile);
 
@@ -176,15 +176,9 @@ async function deepTest(): Promise<void> {
   const imageDataUrl = `data:image/png;base64,${imageBase64}`;
 
   log("Starting OpenCode server...");
-  const opencodeProcess = Bun.spawn(
-    [
-      "opencode",
-      "serve",
-      "--port",
-      String(OPENCODE_PORT),
-      "--hostname",
-      "127.0.0.1",
-    ],
+  const opencodeProcess = spawn(
+    "opencode",
+    ["serve", "--port", String(OPENCODE_PORT), "--hostname", "127.0.0.1"],
     {
       cwd: PROJECT_DIR,
       env: {
@@ -194,8 +188,7 @@ async function deepTest(): Promise<void> {
         OPENCODE_FAKE_VCS: "git",
         OLLAMA_VISION_MODEL: VISION_MODEL,
       },
-      stdout: "pipe",
-      stderr: "pipe",
+      stdio: ["pipe", "pipe", "pipe"],
     },
   );
 
@@ -359,8 +352,16 @@ async function deepTest(): Promise<void> {
     }
   } finally {
     log("Shutting down OpenCode server...");
-    opencodeProcess.kill();
-    await opencodeProcess.exited.catch(() => {});
+    opencodeProcess.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      opencodeProcess.on("exit", () => {
+        resolve();
+      });
+      setTimeout(() => {
+        opencodeProcess.kill("SIGKILL");
+        resolve();
+      }, 5_000);
+    });
     log("OpenCode server stopped.");
   }
 }
