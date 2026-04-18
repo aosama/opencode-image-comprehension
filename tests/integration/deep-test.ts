@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
@@ -95,13 +95,27 @@ async function checkSkillInstalled(): Promise<void> {
     await execFileAsync("test", ["-f", skillPath], { timeout: 5_000 });
     log("image-comprehension-ollama skill is installed");
   } catch {
-    log("Installing image-comprehension-ollama skill...");
-    await execFileAsync("npx", [
-      "skills",
-      "add",
-      "aosama/image-comprehension-ollama",
-    ], { timeout: 120_000 });
-    log("Skill installed");
+    log("Skill not found locally, attempting to install...");
+    try {
+      await execFileAsync("npx", [
+        "skills",
+        "add",
+        "aosama/image-comprehension-ollama",
+      ], { timeout: 120_000 });
+      log("Skill installed via npx skills add");
+    } catch (installErr) {
+      log(
+        `Could not install skill via npx: ${installErr instanceof Error ? installErr.message : String(installErr)}. ` +
+        "The skill may already be installed by the CI workflow, or the plugin will attempt auto-install at runtime.",
+      );
+      if (existsSync(skillPath)) {
+        log(`Skill script found at ${skillPath} after install attempt`);
+      } else {
+        log(
+          `Skill script not found at ${skillPath}. The plugin will attempt to install it automatically when it initializes.`,
+        );
+      }
+    }
   }
 }
 

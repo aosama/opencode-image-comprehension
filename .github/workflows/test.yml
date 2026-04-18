@@ -49,7 +49,8 @@ jobs:
           ollama list
 
       - name: Install image-comprehension-ollama skill
-        run: npx skills add aosama/image-comprehension-ollama
+        run: npx -y skills add aosama/image-comprehension-ollama
+        timeout-minutes: 3
 
       - name: Build plugin
         run: |
