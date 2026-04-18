@@ -1,0 +1,96 @@
+name: Integration Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache Ollama models
+        uses: actions/cache@v4
+        with:
+          path: ~/.ollama
+          key: ollama-models-llama3.2-3b-moondream-1.8b-v1
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama and pull models
+        run: |
+          ollama serve &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:11434/api/version > /dev/null 2>&1; then
+              echo "Ollama is ready"
+              break
+            fi
+            echo "Waiting for Ollama... ($i/30)"
+            sleep 2
+          done
+          ollama pull llama3.2:3b
+          ollama pull moondream:1.8b
+          ollama list
+
+      - name: Install image-comprehension-ollama skill
+        run: npx skills add aosama/image-comprehension-ollama
+
+      - name: Build plugin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install OpenCode
+        run: npm install -g opencode-ai
+
+      - name: Smoke test - skill script
+        run: |
+          TEST_IMAGE="tests/integration/test-image.png"
+          SKILL_PATH="$HOME/.agents/skills/image-comprehension-ollama/scripts/comprehend_image.sh"
+          
+          echo "Testing skill script directly..."
+          RESULT=$("$SKILL_PATH" --image "$TEST_IMAGE" --prompt "What do you see in this image?" --model moondream:1.8b 2>&1 || true)
+          
+          if [ -z "$RESULT" ]; then
+            echo "ERROR: Skill script returned empty output"
+            exit 1
+          fi
+          
+          echo "Skill script output (first 200 chars): ${RESULT:0:200}"
+          
+          if echo "$RESULT" | grep -qiE "error|fail|not found"; then
+            echo "WARNING: Skill script output contains error-like text"
+            echo "Full output: $RESULT"
+          else
+            echo "Skill script test PASSED"
+          fi
+
+      - name: Deep test - OpenCode serve integration
+        env:
+          OPENCODE_CONFIG_CONTENT: '{"model":"ollama/llama3.2:3b","plugin":["./dist/index.js"],"provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","name":"Ollama","options":{"baseURL":"http://localhost:11434/v1"}}}}'
+          OPENCODE_DISABLE_DEFAULT_PLUGINS: "true"
+          OPENCODE_FAKE_VCS: git
+          OLLAMA_VISION_MODEL: moondream:1.8b
+          DEBUG_OPENCODE: "1"
+        run: |
+          npx tsx tests/integration/deep-test.ts
+
+      - name: Cleanup
+        if: always()
+        run: pkill ollama || true

@@ -1,0 +1,46 @@
+{
+  "name": "opencode-image-comprehension",
+  "version": "1.0.0",
+  "description": "OpenCode plugin that enables image comprehension for non-vision models using local Ollama vision models",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "format": "prettier --write src/**/*.ts",
+    "format:check": "prettier --check src/**/*.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "image",
+    "vision",
+    "ollama",
+    "image-comprehension",
+    "mcp"
+  ],
+  "author": "aosama",
+  "license": "MIT",
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.4.11",
+    "@opencode-ai/sdk": "^1.4.11",
+    "@types/node": "^22.0.0",
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0",
+    "@opencode-ai/sdk": ">=1.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aosama/opencode-image-comprehension"
+  }
+}
