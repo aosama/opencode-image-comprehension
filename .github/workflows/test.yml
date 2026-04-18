@@ -87,7 +87,7 @@ jobs:
 
       - name: Deep test - OpenCode serve integration
         env:
-          OPENCODE_CONFIG_CONTENT: '{"model":"ollama/llama3.2:3b","plugin":["./dist/index.js"],"provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","name":"Ollama","options":{"baseURL":"http://localhost:11434/v1"}}}}'
+          OPENCODE_CONFIG_CONTENT: '{"model":"ollama/llama3.2:3b","plugin":["./dist/index.js"],"provider":{"ollama":{"npm":"@ai-sdk/openai-compatible","name":"Ollama","options":{"baseURL":"http://localhost:11434/v1"},"models":{"llama3.2:3b":{"name":"Llama 3.2 3B"}}}}}'
           OPENCODE_DISABLE_DEFAULT_PLUGINS: "true"
           OPENCODE_FAKE_VCS: git
           OLLAMA_VISION_MODEL: moondream:1.8b

@@ -26,6 +26,11 @@ const OPENCODE_CONFIG = JSON.stringify({
       options: {
         baseURL: "http://localhost:11434/v1",
       },
+      models: {
+        [NON_VISION_MODEL]: {
+          name: "Llama 3.2 3B",
+        },
+      },
     },
   },
 });
