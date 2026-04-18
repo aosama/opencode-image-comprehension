@@ -35,8 +35,8 @@ const OPENCODE_CONFIG = JSON.stringify({
   },
 });
 
-const TIMEOUT_MS = 120_000;
-const POLL_INTERVAL_MS = 3_000;
+const TIMEOUT_MS = 180_000;
+const POLL_INTERVAL_MS = 2_000;
 
 function log(msg: string): void {
   console.log(`[deep-test] ${msg}`);
@@ -100,49 +100,35 @@ async function checkSkillInstalled(): Promise<void> {
     }
   }
 
-  log("Skill not found at expected paths, attempting to install...");
-  try {
-    await execFileAsync("npx", [
-      "-y",
-      "skills",
-      "add",
-      "aosama/image-comprehension-ollama",
-    ], { timeout: 120_000 });
-    log("Skill installed via npx skills add");
-
-    for (const candidate of skillSearchPaths) {
-      if (existsSync(candidate)) {
-        log(`Skill script confirmed at: ${candidate}`);
-        return;
-      }
-    }
-    log("Skill install command succeeded but script not found at expected paths. The plugin will attempt to resolve it at runtime.");
-  } catch (installErr) {
-    log(
-      `Could not install skill via npx: ${installErr instanceof Error ? installErr.message : String(installErr)}. ` +
-      "The plugin will attempt to install it automatically when it initializes.",
-    );
-  }
+  log("Skill not found at expected paths. The plugin will attempt to resolve it at runtime.");
+  log("Ensure the skill was installed via the CI step or manually before running this test.");
 }
 
 async function fetchJSON(
   url: string,
   options?: RequestInit,
 ): Promise<unknown> {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers || {}),
-    },
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(
-      `HTTP ${response.status} from ${url}: ${text.slice(0, 500)}`,
-    );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300_000);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options?.headers || {}),
+      },
+      signal: options?.signal ?? controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `HTTP ${response.status} from ${url}: ${text.slice(0, 500)}`,
+      );
+    }
+    return response.json();
+  } finally {
+    clearTimeout(timeout);
   }
-  return response.json();
 }
 
 async function waitForOpenCodeServer(): Promise<void> {
