@@ -83,39 +83,40 @@ async function ensureModel(model: string): Promise<void> {
 }
 
 async function checkSkillInstalled(): Promise<void> {
-  const skillPath = join(
-    process.env.HOME || "/root",
-    ".agents",
-    "skills",
-    "image-comprehension-ollama",
-    "scripts",
-    "comprehend_image.sh",
-  );
+  const skillSearchPaths = [
+    join(process.env.HOME || "/root", ".agents", "skills", "image-comprehension-ollama", "scripts", "comprehend_image.sh"),
+    join(process.env.HOME || "/root", ".config", "opencode", "skills", "image-comprehension-ollama", "scripts", "comprehend_image.sh"),
+  ];
+
+  for (const candidate of skillSearchPaths) {
+    if (existsSync(candidate)) {
+      log(`image-comprehension-ollama skill found at: ${candidate}`);
+      return;
+    }
+  }
+
+  log("Skill not found at expected paths, attempting to install...");
   try {
-    await execFileAsync("test", ["-f", skillPath], { timeout: 5_000 });
-    log("image-comprehension-ollama skill is installed");
-  } catch {
-    log("Skill not found locally, attempting to install...");
-    try {
-      await execFileAsync("npx", [
-        "skills",
-        "add",
-        "aosama/image-comprehension-ollama",
-      ], { timeout: 120_000 });
-      log("Skill installed via npx skills add");
-    } catch (installErr) {
-      log(
-        `Could not install skill via npx: ${installErr instanceof Error ? installErr.message : String(installErr)}. ` +
-        "The skill may already be installed by the CI workflow, or the plugin will attempt auto-install at runtime.",
-      );
-      if (existsSync(skillPath)) {
-        log(`Skill script found at ${skillPath} after install attempt`);
-      } else {
-        log(
-          `Skill script not found at ${skillPath}. The plugin will attempt to install it automatically when it initializes.`,
-        );
+    await execFileAsync("npx", [
+      "-y",
+      "skills",
+      "add",
+      "aosama/image-comprehension-ollama",
+    ], { timeout: 120_000 });
+    log("Skill installed via npx skills add");
+
+    for (const candidate of skillSearchPaths) {
+      if (existsSync(candidate)) {
+        log(`Skill script confirmed at: ${candidate}`);
+        return;
       }
     }
+    log("Skill install command succeeded but script not found at expected paths. The plugin will attempt to resolve it at runtime.");
+  } catch (installErr) {
+    log(
+      `Could not install skill via npx: ${installErr instanceof Error ? installErr.message : String(installErr)}. ` +
+      "The plugin will attempt to install it automatically when it initializes.",
+    );
   }
 }
 
