@@ -469,6 +469,30 @@ function getModelFromMessage(message: {
   return info.model;
 }
 
+const VISION_MODEL_PATTERNS = [
+  "*kimi*" /* Moonshot Kimi series (K2.6, K2.5, etc.) */,
+  "*claude*" /* Anthropic Claude vision models */,
+  "*gpt-4*" /* OpenAI GPT-4 vision variants */,
+  "*gemini*" /* Google Gemini */,
+  "*vision*" /* Generic vision suffixed models */,
+  "*vl*" /* Vision-language models (Qwen-VL, etc.) */,
+  "*llava*" /* LLaVA family */,
+];
+
+function modelNameIndicatesVision(model: ModelInfo | undefined): boolean {
+  if (!model) return false;
+  const id = `${model.providerID}/${model.modelID}`.toLowerCase();
+  return VISION_MODEL_PATTERNS.some((pattern) => {
+    const p = pattern.toLowerCase();
+    if (p.startsWith("*") && p.endsWith("*")) {
+      return id.includes(p.slice(1, -1));
+    }
+    if (p.startsWith("*")) return id.endsWith(p.slice(1));
+    if (p.endsWith("*")) return id.startsWith(p.slice(0, -1));
+    return id === p;
+  });
+}
+
 function modelSupportsVision(message: { info: Message }): boolean {
   const modelInfo = (message.info as Record<string, unknown>).model as
     | Record<string, unknown>
@@ -826,7 +850,15 @@ export const ImageComprehensionPlugin: Plugin = async (input) => {
         const model = getModelFromMessage(lastUserMessage);
         if (!modelMatchesAnyPattern(model)) return;
       } else {
-        if (modelSupportsVision(lastUserMessage)) {
+        const model = getModelFromMessage(lastUserMessage);
+        /* Trust metadata if it says the model supports vision, but also trust
+           model name heuristics when metadata is missing or unreliable. This
+           prevents double-vision work (native + plugin) for known vision models
+           such as kimi-k2.6, claude-3, gpt-4o, gemini, etc. */
+        if (
+          modelSupportsVision(lastUserMessage) ||
+          modelNameIndicatesVision(model)
+        ) {
           log(`Model supports vision natively — skipping image comprehension`);
           return;
         }
