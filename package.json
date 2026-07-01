@@ -1,7 +1,7 @@
 {
   "name": "opencode-image-comprehension",
   "version": "1.0.0",
-  "description": "OpenCode plugin that enables image comprehension for non-vision models using local Ollama vision models",
+  "description": "OpenCode plugin that enables image comprehension for non-vision models using Ollama Cloud vision models",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
@@ -10,8 +10,10 @@
   ],
   "scripts": {
     "build": "tsc",
-    "format": "prettier --write src/**/*.ts",
-    "format:check": "prettier --check src/**/*.ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "test:unit": "npm run build && node --test tests/unit/index.test.mjs",
+    "test:integration:docker": "tests/integration/docker-packed-install-test.sh",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

@@ -26,41 +26,9 @@ if [ ! -f dist/index.js ]; then
   exit 1
 fi
 
-echo "Checking if image-comprehension-ollama skill is installed..."
-SKILL_PATH="$HOME/.agents/skills/image-comprehension-ollama/scripts/comprehend_image.sh"
-if [ ! -f "$SKILL_PATH" ]; then
-  echo "WARN: Skill script not found at $SKILL_PATH"
-  echo "Installing skill..."
-  npx skills add aosama/image-comprehension-ollama
-fi
-
-echo "Checking if Ollama is reachable..."
-if ! curl -sf http://localhost:11434/api/version >/dev/null 2>&1; then
-  echo "ERROR: Ollama is not reachable at localhost:11434"
-  echo "Make sure Ollama is running: ollama serve"
-  exit 1
-fi
-
-echo "Checking if required models are available..."
-LLAMA_AVAILABLE=$(ollama list 2>/dev/null | grep -c "llama3.2:3b" || true)
-MOONDREAM_AVAILABLE=$(ollama list 2>/dev/null | grep -c "moondream:1.8b" || true)
-
-if [ "$LLAMA_AVAILABLE" -eq 0 ]; then
-  echo "Pulling llama3.2:3b..."
-  ollama pull llama3.2:3b
-fi
-
-if [ "$MOONDREAM_AVAILABLE" -eq 0 ]; then
-  echo "Pulling moondream:1.8b..."
-  ollama pull moondream:1.8b
-fi
-
-echo "Running smoke test with skill script directly..."
-SKILL_RESULT=$("$SKILL_PATH" --image "$TEST_IMAGE" --prompt "Describe this image briefly" --model moondream:1.8b 2>/dev/null || echo "SKILL_FAILED")
-if [ "$SKILL_RESULT" = "SKILL_FAILED" ]; then
-  echo "WARN: Skill script test failed, but continuing with OpenCode test"
-else
-  echo "Skill script test passed. Description: ${SKILL_RESULT:0:100}..."
+echo "Checking Ollama Cloud API key environment..."
+if [ -z "${OLLAMA_CLOUD_API_KEY:-}" ] && [ -z "${OLLAMA_API_KEY:-}" ]; then
+  echo "WARN: OLLAMA_CLOUD_API_KEY or OLLAMA_API_KEY is not set. Tool execution will fail until one is configured."
 fi
 
 echo "Configuring OpenCode..."

@@ -33,3 +33,12 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Unit tests
+        run: node --test tests/unit/index.test.mjs
+
+      - name: Shell syntax check
+        run: bash -n tests/integration/quick-test.sh tests/integration/setup-ci.sh tests/integration/docker-packed-install-test.sh
+
+      - name: Package dry run
+        run: npm pack --dry-run

@@ -4,29 +4,33 @@
 
 ## Maintenance Mandate
 
-1. **Before every commit**, ask: did I change anything this guide documents? If yes, update the guide in the same commit. No exceptions.
-2. **At session start**, spot-check 2-3 key facts against the actual codebase (paths, versions, script names). If anything drifted, update immediately.
-3. **Quarterly minimum**, re-verify if the repo hasn't been touched. Stale guidance is worse than no guidance.
+1. **Before every commit**, update this guide if changed work affects anything it documents.
+2. **At session start**, spot-check 2-3 key facts before trusting the guide.
+3. **After 90 days**, treat `Last verified` as suspect and re-verify before relying on it.
+4. **With expensive gotchas**, update the guide in the same change that adds, removes, renames, or discovers them.
+5. **For guide-only reorganization**, update `Last verified` but do not invent factual changes.
 
-- Last verified: 2026-04-30
-- Changes since last verify: initial creation
+- Last verified: 2026-07-01
+- Snapshot: Docker packed-install test, Ollama Cloud provider, and 10-minute CI job caps are current.
 
 ## Project Overview
 
-A TypeScript single-file OpenCode plugin that enables image comprehension for non-vision LLM models. It intercepts pasted images, saves them to temp files, strips them from the message, and injects text instructions that guide the LLM to call a `comprehend_image` tool — which shells out to a local Ollama vision model (default: `moondream:1.8b`). The single most important architectural fact: **all ~910 lines of plugin logic reside in a single file (`src/index.ts`) with zero runtime dependencies** — only `@opencode-ai/plugin` and `@opencode-ai/sdk` as peer deps plus Node.js built-ins. No unit tests exist, only integration tests.
+A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM models. It intercepts pasted images, saves them as local files, strips unsupported image media from the message, and injects file-path instructions that guide the LLM to call `comprehend_image` with `image_path` and its own `prompt`; the tool calls Ollama Cloud directly (default vision model: `gemma4:31b`). Keep `src/index.ts` as entry wiring only; behavior lives in focused modules under `src/`.
 
 ## Known Gotchas
 
-- **No unit tests, no test framework** — by design ("single-file architecture, no test framework configured"). Only integration tests under `tests/integration/`.
+- **Unit tests run against built output** — `npm run test:unit` builds first, then runs `node --test tests/unit/index.test.mjs`.
+- **Docker packed-install test is the release gate** — `npm run test:integration:docker` packs the tarball, installs it in a clean container, and runs OpenCode with `ollama-cloud/glm-5.2`.
 - **`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` in CI** — GitHub Actions deprecation workaround for `setup-node` runner.
-- **`VISION_MODEL_PATTERNS` is hardcoded** (kimi, claude, gpt-4, etc.) — new vision models not matching patterns will be incorrectly treated as non-vision.
-- **`resolveSkillScriptPath()` returns path even when file doesn't exist** — logs warning but returns path. Error only surfaces at tool invocation time, not startup.
-- **`ensureSkillInstalled()` has 120-second timeout** on `npx skills add`. Slow network means plugin starts with skill not-ready.
+- **Self-contained provider call** — no external skill, local Ollama server, or model pull is required.
+- **Tool accepts local paths** — `comprehend_image` accepts absolute, `file://`, or current-directory-relative local image paths; remote/data URLs are rejected at tool time.
+- **Auto activation depends on OpenCode provider metadata** — if capability lookup is unavailable and no patterns are configured, auto mode skips image transformation rather than guessing.
 - **Integration test uses `--dangerously-skip-permissions`** — would not work in production setup.
 - **`package.json` has no `dependencies`** — only `devDependencies` + `peerDependencies`. Relies on host (OpenCode) to provide peer packages.
-- **`deep-test.ts` uses string-matching** on stdout for verification — fragile, may break if model changes descriptive style.
-- **CI matrix**: `ci.yml` tests Node 20/22/24, `test.yml` pins Node 22 only. Could mask issues on other versions.
-- **Naming constant mismatch**: `PLUGIN_NAME = "image-comprehension"` differs from npm package name (`opencode-image-comprehension`). No single source of truth.
+- **`deep-test.ts` uses string-matching** on stdout for tool-call and description evidence — fragile if model wording changes.
+- **CI split**: `ci.yml` is offline-safe; `test.yml` skips cloud integration if the secret is absent. Both jobs are capped at 10 minutes.
+- **Plugin export shape matters**: default export is a v1 object with `id` and `server`; named `__test` exports would break legacy loading if default were just a function.
+- **Agent guidance split**: `AGENTS.md` is intentionally principle-only; the only repo-local instruction file left is the CI/CD constraint.
 
 ## Conventions
 
@@ -35,7 +39,6 @@ A TypeScript single-file OpenCode plugin that enables image comprehension for no
 - **Config precedence**: project-level > user-level > hardcoded defaults. Missing config files are silently skipped.
 - **Synthetic text parts**: replacement text parts set `synthetic: true` to mark plugin-created vs user-created.
 - **Prettier**: double quotes, semicolons always, trailing commas, 80-char width, 2-space tabs. No ESLint.
-- **Conventional Commits**: `feat:`, `fix:`, `docs:`. Branch: `feature/*`, `fix/*`, `docs/*`.
 - **Supported formats**: PNG, JPEG, GIF, WebP, BMP.
 
 ## Structure Map
@@ -43,47 +46,55 @@ A TypeScript single-file OpenCode plugin that enables image comprehension for no
 ```
 opencode-image-comprehension/
 ├── src/
-│   └── index.ts                     # THE ENTIRE PLUGIN (~910 lines)
+│   ├── index.ts                     # Plugin entry wiring
+│   ├── config.ts                    # Config parsing and precedence
+│   ├── activation.ts                # Model capability/pattern checks
+│   ├── image-materialization.ts     # Attached image saving and local path validation
+│   ├── message-transform.ts         # Non-vision message rewrite
+│   ├── comprehend-tool.ts           # comprehend_image tool definition
+│   └── providers/ollama-cloud.ts    # Ollama Cloud request/response handling
 ├── dist/                            # Build output (gitignored)
 ├── tests/
+│   ├── unit/
+│   │   └── index.test.mjs           # Node test runner against dist/index.js
 │   └── integration/
 │       ├── deep-test.ts             # Spawns opencode, verifies stdout
-│       ├── quick-test.sh            # Smoke: build, check skill, check Ollama
+│       ├── docker-packed-install-test.sh # npm pack + Docker install test
+│       ├── quick-test.sh            # Smoke: build, check API key environment
 │       ├── setup-ci.sh              # CI bootstrap
 │       └── test-image.png           # 1x1 PNG test image
 ├── .github/
 │   ├── workflows/
-│   │   ├── ci.yml                   # Format + build, Node 20/22/24 matrix
-│   │   └── test.yml                 # Integration test (Ollama Cloud + local vision)
-│   └── instructions/                # Agent instruction files
+│   │   ├── ci.yml                   # Format + build + unit, Node 20/22/24 matrix
+│   │   └── test.yml                 # Integration test (Ollama Cloud chat + vision)
+│   └── instructions/
+│       └── cicd.instructions.md     # CI/CD constraints only
 ├── package.json                     # No "dependencies", only devDeps + peerDeps
 ├── tsconfig.json                    # Strict, ESNext, Node16 resolution
-├── .prettierrc.json
-├── AGENTS.md                        # Agent instructions + architecture
-├── README.md
-└── LICENSE                          # MIT
 ```
 
 ## Entry Points
 
 - **Build**: `npm run build` (tsc only, output → `dist/`). No bundler.
+- **Unit test**: `npm run test:unit` (builds first, then `node --test`).
+- **Packed install test**: `npm run test:integration:docker` (needs Docker and Ollama Cloud key).
 - **Format**: `npm run format` (write) or `npm run format:check` (verify-only).
-- **Local dev**: Build, then symlink: `ln -sf $(pwd)/dist/index.js ~/.config/opencode/plugin/opencode-image-comprehension.js`. Requires Ollama running, vision model pulled, skill installed.
-- **CI (format+build)**: `.github/workflows/ci.yml` — push/PR to main. Node 20/22/24.
-- **CI (integration)**: `.github/workflows/test.yml` — needs `OLLAMA_CLOUD_APIKEY` secret. Installs Ollama, pulls model, installs skill, runs deep-test.
-- **Gotcha**: `npx skills add aosama/image-comprehension-ollama` is required once before first use.
+- **Local dev**: Build, then symlink: `ln -sf $(pwd)/dist/index.js ~/.config/opencode/plugin/opencode-image-comprehension.js`. Requires `OLLAMA_CLOUD_API_KEY` or `OLLAMA_API_KEY` for tool execution.
+- **CI (offline-safe)**: `.github/workflows/ci.yml` — format, build, unit, shell syntax, package dry run on Node 20/22/24.
+- **CI (optional cloud)**: `.github/workflows/test.yml` — builds/tests on Node 22, skips OpenCode/Ollama Cloud deep-test if `OLLAMA_CLOUD_API_KEY` is absent.
+- **Gotcha**: Plugin config is separate from OpenCode provider config: `.opencode/opencode-image-comprehension.json` or `~/.config/opencode/opencode-image-comprehension.json`.
 
 ## What to Verify
 
 1. **Versions** — Node engine >=18.0.0, CI matrix 20/22/24. TypeScript ^5.7.0. Peer deps `@opencode-ai/plugin` and `@opencode-ai/sdk` >=1.0.0.
-2. **Paths** — Config files at `~/.config/opencode/opencode-image-comprehension.json` and `.opencode/opencode-image-comprehension.json`. Skill script at `~/.agents/skills/image-comprehension-ollama/scripts/comprehend_image.sh`.
-3. **Vision detection** — `VISION_MODEL_PATTERNS` list current. New vision models may not match.
-4. **Skill auto-install** — `npx skills add` repo still accessible. 120s timeout sufficient.
+2. **Paths** — Config files at `~/.config/opencode/opencode-image-comprehension.json` and `.opencode/opencode-image-comprehension.json`.
+3. **Vision detection** — OpenCode `client.provider.list()` shape may expose either `modalities.input` or `capabilities.input.image`; plugin supports both.
+4. **Provider config** — `provider`, `model`, `apiKeyEnv`, `baseUrl`, `timeoutSeconds`, and `activation` parse as expected.
 5. **Config merging** — Project > user > default precedence. Partial configs don't clobber unrelated keys.
-6. **CI secrets** — `OLLAMA_CLOUD_APIKEY` valid. Model cache key may need bump if model changes.
+6. **CI secrets** — `OLLAMA_CLOUD_API_KEY` valid for both chat model and image comprehension model.
 7. **Supported formats** — `SUPPORTED_MIME_TYPES` covers all formats OpenCode may pass through.
 
 ## Maintenance Snapshot
 
-- Last verified: 2026-04-30
-- Changes since last verify: initial creation
+- Last verified: 2026-07-01
+- Snapshot: local Ollama/skill assumptions are retired; Docker packed-install test, Ollama Cloud provider, and 10-minute CI job caps are current.

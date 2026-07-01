@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -12,7 +13,7 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -21,82 +22,47 @@ jobs:
         with:
           node-version: 22
 
-      - name: Cache Ollama models
-        uses: actions/cache@v4
-        with:
-          path: ~/.ollama
-          key: ollama-models-moondream-1.8b-v1
-
       - name: Cache npm dependencies
         uses: actions/cache@v4
         with:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
-      - name: Install Ollama
-        run: curl -fsSL https://ollama.com/install.sh | sh
-
-      - name: Start Ollama and pull vision model
-        env:
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_CLOUD_APIKEY }}
-        run: |
-          ollama serve &
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:11434/api/version > /dev/null 2>&1; then
-              echo "Ollama is ready"
-              break
-            fi
-            echo "Waiting for Ollama... ($i/30)"
-            sleep 2
-          done
-          ollama pull moondream:1.8b
-          ollama list
-
-      - name: Install image-comprehension-ollama skill
-        run: npx -y skills add aosama/image-comprehension-ollama
-        timeout-minutes: 3
-
       - name: Build plugin
         run: |
           npm ci
           npm run build
 
+      - name: Unit tests
+        run: node --test tests/unit/index.test.mjs
+
+      - name: Check cloud integration secret
+        id: cloud-secret
+        env:
+          OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+        run: |
+          if [ -n "${OLLAMA_CLOUD_API_KEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Ollama Cloud integration secret is configured"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Cloud integration skipped::OLLAMA_CLOUD_API_KEY secret is not configured or is unavailable for this event"
+          fi
+
       - name: Install OpenCode
+        if: ${{ steps.cloud-secret.outputs.available == 'true' }}
+        timeout-minutes: 3
         run: npm install -g opencode-ai
 
-      - name: Smoke test - skill script
-        run: |
-          TEST_IMAGE="tests/integration/test-image.png"
-          SKILL_PATH="$HOME/.agents/skills/image-comprehension-ollama/scripts/comprehend_image.sh"
-          
-          echo "Testing skill script directly..."
-          RESULT=$("$SKILL_PATH" --image "$TEST_IMAGE" --prompt "What do you see in this image?" --model moondream:1.8b 2>&1 || true)
-          
-          if [ -z "$RESULT" ]; then
-            echo "ERROR: Skill script returned empty output"
-            exit 1
-          fi
-          
-          echo "Skill script output (first 200 chars): ${RESULT:0:200}"
-          
-          if echo "$RESULT" | grep -qiE "error|fail|not found"; then
-            echo "WARNING: Skill script output contains error-like text"
-            echo "Full output: $RESULT"
-          else
-            echo "Skill script test PASSED"
-          fi
-
       - name: Deep test - OpenCode run integration
+        if: ${{ steps.cloud-secret.outputs.available == 'true' }}
+        timeout-minutes: 6
         env:
           NON_VISION_MODEL: qwen3.5:cloud
-          OLLAMA_VISION_MODEL: moondream:1.8b
-          OLLAMA_API_KEY: ${{ secrets.OLLAMA_CLOUD_APIKEY }}
+          IMAGE_COMPREHENSION_MODEL: gemma4:31b
+          OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
           OPENCODE_DISABLE_DEFAULT_PLUGINS: "true"
           OPENCODE_FAKE_VCS: git
           DEBUG_OPENCODE: "1"
         run: |
           npx tsx tests/integration/deep-test.ts
-
-      - name: Cleanup
-        if: always()
-        run: pkill ollama || true
