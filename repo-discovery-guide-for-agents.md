@@ -81,7 +81,7 @@ opencode-image-comprehension/
 - **Format**: `npm run format` (write) or `npm run format:check` (verify-only).
 - **Local dev**: Build, then symlink: `ln -sf $(pwd)/dist/index.js ~/.config/opencode/plugin/opencode-image-comprehension.js`. Requires `OLLAMA_CLOUD_API_KEY` or `OLLAMA_API_KEY` for tool execution.
 - **CI (offline-safe)**: `.github/workflows/ci.yml` — format, build, unit, shell syntax, package dry run on Node 20/22/24.
-- **CI (optional cloud)**: `.github/workflows/test.yml` — builds/tests on Node 22, skips OpenCode/Ollama Cloud deep-test if `OLLAMA_CLOUD_API_KEY` is absent.
+- **CI (optional cloud)**: `.github/workflows/test.yml` — builds/tests on Node 22, skips OpenCode/Ollama Cloud deep-test if `OLLAMA_CLOUD_API_KEY` and legacy `OLLAMA_CLOUD_APIKEY` are absent.
 - **Gotcha**: Plugin config is separate from OpenCode provider config: `.opencode/opencode-image-comprehension.json` or `~/.config/opencode/opencode-image-comprehension.json`.
 
 ## What to Verify
@@ -91,7 +91,7 @@ opencode-image-comprehension/
 3. **Vision detection** — OpenCode `client.provider.list()` shape may expose either `modalities.input` or `capabilities.input.image`; plugin supports both.
 4. **Provider config** — `provider`, `model`, `apiKeyEnv`, `baseUrl`, `timeoutSeconds`, and `activation` parse as expected.
 5. **Config merging** — Project > user > default precedence. Partial configs don't clobber unrelated keys.
-6. **CI secrets** — `OLLAMA_CLOUD_API_KEY` valid for both chat model and image comprehension model.
+6. **CI secrets** — `OLLAMA_CLOUD_API_KEY` or legacy `OLLAMA_CLOUD_APIKEY` valid for both chat model and image comprehension model.
 7. **Supported formats** — `SUPPORTED_MIME_TYPES` covers all formats OpenCode may pass through.
 
 ## Maintenance Snapshot

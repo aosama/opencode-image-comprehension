@@ -39,7 +39,11 @@ function snippetAround(value: string, needle: string): string | undefined {
 }
 
 function getCloudApiKey(): string | undefined {
-  return process.env.OLLAMA_API_KEY || process.env.OLLAMA_CLOUD_API_KEY;
+  return (
+    process.env.OLLAMA_CLOUD_API_KEY ||
+    process.env.OLLAMA_API_KEY ||
+    process.env.LEGACY_OLLAMA_CLOUD_APIKEY
+  );
 }
 
 function requireCloudApiKey(): void {
@@ -169,7 +173,7 @@ async function deepTest(): Promise<void> {
           OPENCODE_FAKE_VCS: "git",
           IMAGE_COMPREHENSION_MODEL: VISION_MODEL,
           OLLAMA_API_KEY: process.env.OLLAMA_API_KEY || "",
-          OLLAMA_CLOUD_API_KEY: process.env.OLLAMA_CLOUD_API_KEY || "",
+          OLLAMA_CLOUD_API_KEY: getCloudApiKey() || "",
         },
         timeout: TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,

@@ -40,13 +40,20 @@ jobs:
         id: cloud-secret
         env:
           OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+          LEGACY_OLLAMA_CLOUD_APIKEY: ${{ secrets.OLLAMA_CLOUD_APIKEY }}
         run: |
           if [ -n "${OLLAMA_CLOUD_API_KEY:-}" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "secret_name=OLLAMA_CLOUD_API_KEY" >> "$GITHUB_OUTPUT"
             echo "Ollama Cloud integration secret is configured"
+          elif [ -n "${LEGACY_OLLAMA_CLOUD_APIKEY:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "secret_name=OLLAMA_CLOUD_APIKEY" >> "$GITHUB_OUTPUT"
+            echo "Ollama Cloud integration secret is configured using legacy name OLLAMA_CLOUD_APIKEY"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Cloud integration skipped::OLLAMA_CLOUD_API_KEY secret is not configured or is unavailable for this event"
+            echo "secret_name=" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Cloud integration skipped::OLLAMA_CLOUD_API_KEY or legacy OLLAMA_CLOUD_APIKEY secret is not configured or is unavailable for this event"
           fi
 
       - name: Install OpenCode
@@ -61,6 +68,7 @@ jobs:
           NON_VISION_MODEL: qwen3.5:cloud
           IMAGE_COMPREHENSION_MODEL: gemma4:31b
           OLLAMA_CLOUD_API_KEY: ${{ secrets.OLLAMA_CLOUD_API_KEY }}
+          LEGACY_OLLAMA_CLOUD_APIKEY: ${{ secrets.OLLAMA_CLOUD_APIKEY }}
           OPENCODE_DISABLE_DEFAULT_PLUGINS: "true"
           OPENCODE_FAKE_VCS: git
           DEBUG_OPENCODE: "1"
