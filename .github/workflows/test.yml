@@ -62,7 +62,9 @@ jobs:
         run: npm install -g opencode-ai
 
       - name: Deep test - OpenCode run integration
+        id: deep-test
         if: ${{ steps.cloud-secret.outputs.available == 'true' }}
+        continue-on-error: ${{ github.event_name != 'workflow_dispatch' }}
         timeout-minutes: 6
         env:
           NON_VISION_MODEL: qwen3.5:cloud
@@ -74,3 +76,10 @@ jobs:
           DEBUG_OPENCODE: "1"
         run: |
           npx tsx tests/integration/deep-test.ts
+
+      - name: Report optional cloud integration failure
+        if: ${{ always() && steps.cloud-secret.outputs.available == 'true' && steps.deep-test.outcome != 'success' && github.event_name != 'workflow_dispatch' }}
+        run: |
+          echo "::warning title=Optional cloud integration failed::The Ollama Cloud deep test failed using ${SECRET_NAME}. Push and pull_request workflows keep this non-blocking; run this workflow manually after fixing the secret to enforce the cloud integration gate."
+        env:
+          SECRET_NAME: ${{ steps.cloud-secret.outputs.secret_name }}

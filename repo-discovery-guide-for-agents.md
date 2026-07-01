@@ -81,7 +81,7 @@ opencode-image-comprehension/
 - **Format**: `npm run format` (write) or `npm run format:check` (verify-only).
 - **Local dev**: Build, then symlink: `ln -sf $(pwd)/dist/index.js ~/.config/opencode/plugin/opencode-image-comprehension.js`. Requires `OLLAMA_CLOUD_API_KEY` or `OLLAMA_API_KEY` for tool execution.
 - **CI (offline-safe)**: `.github/workflows/ci.yml` — format, build, unit, shell syntax, package dry run on Node 20/22/24.
-- **CI (optional cloud)**: `.github/workflows/test.yml` — builds/tests on Node 22, skips OpenCode/Ollama Cloud deep-test if `OLLAMA_CLOUD_API_KEY` and legacy `OLLAMA_CLOUD_APIKEY` are absent.
+- **CI (optional cloud)**: `.github/workflows/test.yml` — push/PR keeps cloud failures non-blocking; manual dispatch enforces the cloud gate when a secret exists.
 - **Gotcha**: Plugin config is separate from OpenCode provider config: `.opencode/opencode-image-comprehension.json` or `~/.config/opencode/opencode-image-comprehension.json`.
 
 ## What to Verify
