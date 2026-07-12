@@ -6,6 +6,9 @@ import {
   CONFIG_FILENAME,
   DEFAULT_ACTIVATION_MODE,
   DEFAULT_API_KEY_ENV,
+  DEFAULT_OMLX_API_KEY_ENV,
+  DEFAULT_OMLX_MODEL,
+  DEFAULT_OMLX_URL,
   DEFAULT_OLLAMA_CLOUD_URL,
   DEFAULT_PROVIDER,
   DEFAULT_TIMEOUT_SECONDS,
@@ -49,11 +52,11 @@ function parseString(value: unknown): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
-function parseProvider(value: unknown): "ollama-cloud" | undefined {
-  // Keep the provider enum deliberately narrow until another provider is fully
-  // implemented and tested. Unknown provider values are ignored instead of
-  // accepted and failing later in tool execution.
-  return value === "ollama-cloud" ? value : undefined;
+function parseProvider(value: unknown): "ollama-cloud" | "omlx" | undefined {
+  // Keep the provider enum deliberately narrow. Unknown provider values are
+  // ignored instead of accepted and failing later in tool execution.
+  if (value === "ollama-cloud" || value === "omlx") return value;
+  return undefined;
 }
 
 function parseBaseUrl(value: unknown): string | undefined {
@@ -157,12 +160,20 @@ export function resolvePluginConfig(
   // Resolve everything in one place so tests and runtime use the same precedence
   // behavior. Project config intentionally wins over user config because it is
   // closest to the repository/session being operated on.
+  //
+  // Provider is resolved first so the provider-specific defaults for model,
+  // apiKeyEnv, and baseUrl can be selected. This lets a user set only
+  // {"provider":"omlx"} and inherit oMLX defaults for the other fields instead
+  // of having to repeat them.
+  const providerResult = selectWithPrecedence(
+    projectConfig?.provider,
+    userConfig?.provider,
+    DEFAULT_PROVIDER,
+  );
+  const isOmlx = providerResult.value === "omlx";
+
   return {
-    provider: selectWithPrecedence(
-      projectConfig?.provider,
-      userConfig?.provider,
-      DEFAULT_PROVIDER,
-    ).value,
+    provider: providerResult.value,
     models: selectWithPrecedence(
       projectConfig?.models,
       userConfig?.models,
@@ -171,7 +182,7 @@ export function resolvePluginConfig(
     model: selectWithPrecedence(
       projectConfig?.model ?? projectConfig?.visionModel,
       userConfig?.model ?? userConfig?.visionModel,
-      DEFAULT_VISION_MODEL,
+      isOmlx ? DEFAULT_OMLX_MODEL : DEFAULT_VISION_MODEL,
     ).value,
     apiKey: selectWithPrecedence(
       projectConfig?.apiKey,
@@ -181,12 +192,12 @@ export function resolvePluginConfig(
     apiKeyEnv: selectWithPrecedence(
       projectConfig?.apiKeyEnv,
       userConfig?.apiKeyEnv,
-      DEFAULT_API_KEY_ENV,
+      isOmlx ? DEFAULT_OMLX_API_KEY_ENV : DEFAULT_API_KEY_ENV,
     ).value,
     baseUrl: selectWithPrecedence(
       projectConfig?.baseUrl,
       userConfig?.baseUrl,
-      DEFAULT_OLLAMA_CLOUD_URL,
+      isOmlx ? DEFAULT_OMLX_URL : DEFAULT_OLLAMA_CLOUD_URL,
     ).value,
     timeoutSeconds: selectWithPrecedence(
       projectConfig?.timeoutSeconds,

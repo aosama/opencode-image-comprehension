@@ -15,6 +15,10 @@ import {
   getProviderApiKey,
   parseOllamaCloudDescription,
 } from "../../dist/providers/ollama-cloud.js";
+import {
+  getOmlxApiKey,
+  parseOmlxDescription,
+} from "../../dist/providers/omlx.js";
 
 test("resolves Ollama Cloud config with legacy visionModel fallback", () => {
   const config = __test.resolvePluginConfig(
@@ -381,4 +385,119 @@ test("Ollama Cloud response parser returns trimmed content and rejects malformed
   );
   assert.equal(parseOllamaCloudDescription({ message: {} }), undefined);
   assert.equal(parseOllamaCloudDescription(null), undefined);
+});
+
+test("default config with no provider set still resolves to ollama-cloud", () => {
+  const config = __test.resolvePluginConfig(null, null);
+
+  assert.equal(config.provider, "ollama-cloud");
+  assert.equal(config.model, "gemma4:31b");
+  assert.equal(config.baseUrl, "https://ollama.com/api/chat");
+  assert.equal(config.apiKeyEnv, "OLLAMA_CLOUD_API_KEY");
+});
+
+test("configuring provider omlx resolves to oMLX defaults for model, url, and apiKeyEnv", () => {
+  const config = __test.resolvePluginConfig({ provider: "omlx" }, null);
+
+  assert.equal(config.provider, "omlx");
+  assert.equal(config.model, "Ornith-1.0-9B-8bit");
+  assert.equal(config.baseUrl, "http://localhost:8000/v1/chat/completions");
+  assert.equal(config.apiKeyEnv, "OMLX_API_KEY");
+});
+
+test("omlx provider lets explicit config override oMLX defaults", () => {
+  const config = __test.resolvePluginConfig(
+    {
+      provider: "omlx",
+      model: "custom-mlx-model",
+      baseUrl: "http://my-host:9000/v1/chat/completions",
+      apiKeyEnv: "MY_OMLX_KEY",
+    },
+    null,
+  );
+
+  assert.equal(config.provider, "omlx");
+  assert.equal(config.model, "custom-mlx-model");
+  assert.equal(config.baseUrl, "http://my-host:9000/v1/chat/completions");
+  assert.equal(config.apiKeyEnv, "MY_OMLX_KEY");
+});
+
+test("builds oMLX request in OpenAI-compatible format with data URL", () => {
+  assert.deepEqual(
+    __test.buildOmlxRequest({
+      model: "Ornith-1.0-9B-8bit",
+      prompt: "What is shown?",
+      imageBase64: "aW1hZ2U=",
+      mimeType: "image/png",
+    }),
+    {
+      model: "Ornith-1.0-9B-8bit",
+      stream: false,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "What is shown?" },
+            {
+              type: "image_url",
+              image_url: { url: "data:image/png;base64,aW1hZ2U=" },
+            },
+          ],
+        },
+      ],
+    },
+  );
+});
+
+test("getOmlxApiKey falls back to default 1234 when no config or env key is set", () => {
+  // Reproduces the tmux scenario where ~/.env_exports is not sourced and no
+  // OMLX_API_KEY is present in the environment.
+  const config = __test.resolvePluginConfig({ provider: "omlx" }, null);
+
+  assert.equal(getOmlxApiKey(config, {}), "1234");
+});
+
+test("getOmlxApiKey prefers config value, then configured env, then OMLX_API_KEY, then default", () => {
+  const config = __test.resolvePluginConfig({ provider: "omlx" }, null);
+
+  assert.equal(
+    getOmlxApiKey({ ...config, apiKey: "config-omlx-key" }, {}),
+    "config-omlx-key",
+  );
+  assert.equal(
+    getOmlxApiKey(config, { OMLX_API_KEY: "env-omlx-key" }),
+    "env-omlx-key",
+  );
+  assert.equal(
+    getOmlxApiKey(
+      __test.resolvePluginConfig(
+        { provider: "omlx", apiKeyEnv: "CUSTOM_OMLX_KEY" },
+        null,
+      ),
+      { CUSTOM_OMLX_KEY: "custom-env-key" },
+    ),
+    "custom-env-key",
+  );
+});
+
+test("parseOmlxDescription extracts trimmed content from choices[0].message.content", () => {
+  assert.equal(
+    parseOmlxDescription({
+      choices: [{ message: { content: "  image description  " } }],
+    }),
+    "image description",
+  );
+  assert.equal(
+    parseOmlxDescription({
+      choices: [{ message: { content: "   " } }],
+    }),
+    undefined,
+  );
+  assert.equal(
+    parseOmlxDescription({ choices: [{ message: {} }] }),
+    undefined,
+  );
+  assert.equal(parseOmlxDescription({ choices: [] }), undefined);
+  assert.equal(parseOmlxDescription({}), undefined);
+  assert.equal(parseOmlxDescription(null), undefined);
 });

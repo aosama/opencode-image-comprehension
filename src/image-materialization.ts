@@ -196,3 +196,16 @@ export async function readLocalImageAsBase64(input: {
   const bytes = await readFile(resolvedImage.absolutePath);
   return bytes.toString("base64");
 }
+
+export async function readLocalImage(input: {
+  imagePath: string;
+  directory: string;
+}): Promise<{ base64: string; mime: string }> {
+  // Like readLocalImageAsBase64 but also returns the MIME type so the oMLX
+  // provider can construct a correct data URL for the OpenAI-compatible
+  // image_url content part. The existing ollama-cloud provider keeps using
+  // readLocalImageAsBase64 unchanged.
+  const resolvedImage = await resolveLocalImagePath(input);
+  const bytes = await readFile(resolvedImage.absolutePath);
+  return { base64: bytes.toString("base64"), mime: resolvedImage.mime };
+}

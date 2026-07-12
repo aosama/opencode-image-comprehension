@@ -3,9 +3,11 @@ import { resolvePluginConfig } from "./config.js";
 import { resolveLocalImagePath } from "./image-materialization.js";
 import { generateImageReferencePrompt } from "./prompt.js";
 import { buildOllamaCloudRequest } from "./providers/ollama-cloud.js";
+import { buildOmlxRequest } from "./providers/omlx.js";
 
 export const __test = {
   buildOllamaCloudRequest,
+  buildOmlxRequest,
   generateImageReferencePrompt,
   resolveLocalImagePath,
   resolvePluginConfig,

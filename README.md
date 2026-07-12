@@ -89,11 +89,11 @@ Create a config file at either location (project config takes precedence):
 
 | Option           | Type       | Default                         | Description                                                                                                     |
 | ---------------- | ---------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `provider`       | `string`   | `"ollama-cloud"`                | Vision provider. Only `ollama-cloud` is supported currently                                                     |
-| `model`          | `string`   | `"gemma4:31b"`                  | Ollama Cloud vision model to use for image analysis                                                             |
+| `provider`       | `string`   | `"ollama-cloud"`                | Vision provider. `ollama-cloud` (default, Ollama Cloud) or `omlx` (local oMLX server)                          |
+| `model`          | `string`   | `"gemma4:31b"`                  | Vision model to use for image analysis. Defaults to `Ornith-1.0-9B-8bit` when `provider` is `omlx`              |
 | `apiKey`         | `string`   | _(env)_                         | API key value. Prefer `apiKeyEnv` or environment variables instead of committing this                           |
-| `apiKeyEnv`      | `string`   | `"OLLAMA_CLOUD_API_KEY"`        | Environment variable to read the API key from                                                                   |
-| `baseUrl`        | `string`   | `"https://ollama.com/api/chat"` | Ollama-compatible chat endpoint                                                                                 |
+| `apiKeyEnv`      | `string`   | `"OLLAMA_CLOUD_API_KEY"`        | Environment variable to read the API key from. Defaults to `OMLX_API_KEY` when `provider` is `omlx`            |
+| `baseUrl`        | `string`   | `"https://ollama.com/api/chat"` | Provider chat endpoint. Defaults to `http://localhost:8000/v1/chat/completions` when `provider` is `omlx`      |
 | `timeoutSeconds` | `number`   | `180`                           | Timeout for image download and provider request                                                                 |
 | `activation`     | `string`   | `"auto"`                        | Activation mode: `auto`, `force`, `disabled`, or `patterns`                                                     |
 | `models`         | `string[]` | _(unset)_                       | Model glob patterns used by `patterns` mode or as an `auto` fallback when OpenCode metadata is unavailable      |
@@ -124,6 +124,37 @@ By default, the plugin asks OpenCode for the active model's input modalities and
 ```
 
 When `activation` is `patterns`, the plugin activates **only** for matching models, regardless of their capabilities.
+
+### Using a Local oMLX Server (Alternative Provider)
+
+By default the plugin uses Ollama Cloud, which works for everyone with an API key. If you run a local [oMLX](https://github.com/ml-explore/mlx) server (an Apple Silicon MLX inference server with an OpenAI-compatible API), you can switch the vision backend to it by setting `provider: "omlx"`:
+
+```json
+{
+  "provider": "omlx"
+}
+```
+
+With just that one line, the plugin automatically uses oMLX-appropriate defaults for the other fields:
+
+| Field       | oMLX default                                |
+| ----------- | ------------------------------------------- |
+| `model`     | `Ornith-1.0-9B-8bit`                        |
+| `baseUrl`   | `http://localhost:8000/v1/chat/completions` |
+| `apiKeyEnv` | `OMLX_API_KEY`                              |
+
+oMLX skips API key verification, so the plugin falls back to a default key of `1234` when no `OMLX_API_KEY` environment variable is set. This keeps the plugin working in environments (such as tmux sessions) where your shell profile is not sourced. Set `OMLX_API_KEY` explicitly only if your server enforces a different key.
+
+Override any oMLX default the same way you would for Ollama Cloud:
+
+```json
+{
+  "provider": "omlx",
+  "model": "your-mlx-model",
+  "baseUrl": "http://my-host:9000/v1/chat/completions",
+  "apiKeyEnv": "MY_OMLX_KEY"
+}
+```
 
 ## Recommended Vision Models
 

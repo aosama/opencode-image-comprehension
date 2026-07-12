@@ -4,7 +4,7 @@ import type { Plugin } from "@opencode-ai/plugin";
 // project/user/default precedence has already been applied and optional invalid
 // config values have been discarded.
 export interface PluginConfig {
-  provider: "ollama-cloud";
+  provider: "ollama-cloud" | "omlx";
   models?: string[];
   model: string;
   apiKey?: string;
@@ -19,7 +19,7 @@ export interface PluginConfig {
 // disk. Individual fields are optional and pre-validated before becoming
 // PluginConfig.
 export interface RawPluginConfig {
-  provider?: "ollama-cloud";
+  provider?: "ollama-cloud" | "omlx";
   models?: string[];
   model?: string;
   visionModel?: string;

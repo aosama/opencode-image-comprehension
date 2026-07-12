@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { DEFAULT_IMAGE_PROMPT } from "./constants.js";
 import { describeImageWithOllamaCloud } from "./providers/ollama-cloud.js";
+import { describeImageWithOmlx } from "./providers/omlx.js";
 import type { PluginConfig } from "./types.js";
 
 export function createComprehendImageTool(getConfig: () => PluginConfig) {
@@ -49,7 +50,13 @@ export function createComprehendImageTool(getConfig: () => PluginConfig) {
       try {
         // context.directory is OpenCode's current project/session directory. It
         // is the correct base for relative paths supplied by the LLM or user.
-        return await describeImageWithOllamaCloud({
+        // Dispatch to the configured vision provider so the tool stays unaware
+        // of provider-specific request/response shapes.
+        const describeImage =
+          config.provider === "omlx"
+            ? describeImageWithOmlx
+            : describeImageWithOllamaCloud;
+        return await describeImage({
           imagePath: args.image_path,
           directory: context.directory,
           prompt,
