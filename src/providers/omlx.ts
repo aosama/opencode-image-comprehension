@@ -1,20 +1,13 @@
-import { DEFAULT_OMLX_API_KEY } from "../constants.js";
 import { readLocalImage } from "../image-materialization.js";
 import type { PluginConfig } from "../types.js";
 
 export function getOmlxApiKey(
   config: PluginConfig,
   env: NodeJS.ProcessEnv = process.env,
-): string {
-  // oMLX skips API key verification, so a hardcoded fallback is safe and keeps
-  // the plugin working in environments (e.g. tmux) where ~/.env_exports is not
-  // sourced. Config value and configured env var still win when present.
-  return (
-    config.apiKey ??
-    env[config.apiKeyEnv] ??
-    env.OMLX_API_KEY ??
-    DEFAULT_OMLX_API_KEY
-  );
+): string | undefined {
+  // Authentication is optional for oMLX servers that skip key verification.
+  // Explicit config and environment values still support secured deployments.
+  return config.apiKey ?? env[config.apiKeyEnv] ?? env.OMLX_API_KEY;
 }
 
 export function buildOmlxRequest(input: {
@@ -72,6 +65,10 @@ export async function describeImageWithOmlx(input: {
   // construct one oMLX request, and return only textual content to the LLM.
   // The non-vision model never receives raw image bytes.
   const apiKey = getOmlxApiKey(input.config);
+  const requestHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) requestHeaders.Authorization = `Bearer ${apiKey}`;
 
   const { base64: imageBase64, mime: mimeType } = await readLocalImage({
     imagePath: input.imagePath,
@@ -89,10 +86,7 @@ export async function describeImageWithOmlx(input: {
   try {
     const response = await fetch(input.config.baseUrl, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: requestHeaders,
       body: JSON.stringify(
         buildOmlxRequest({
           model: input.config.model,

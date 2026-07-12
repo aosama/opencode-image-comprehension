@@ -23,7 +23,7 @@ A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM
 - **`FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` in CI** — GitHub Actions deprecation workaround for `setup-node` runner.
 - **Self-contained provider call** — no external skill, local Ollama server, or model pull is required.
 - **`ollama-cloud` is the default provider** — the public npm package must keep working for all users. `omlx` is opt-in via project/user config.
-- **oMLX specifics** — API key falls back to `1234` (oMLX skips verification; fixes tmux where `~/.env_exports` is not sourced). Uses OpenAI-compatible wire format (content array with `text` + `image_url` data URL; response from `choices[0].message.content`). Provider-specific defaults for model/apiKeyEnv/baseUrl applied in `resolvePluginConfig` when provider is `omlx`.
+- **oMLX specifics** — authentication is optional; without `apiKey` or `OMLX_API_KEY`, the plugin omits `Authorization`. Uses OpenAI-compatible wire format (content array with `text` + `image_url` data URL; response from `choices[0].message.content`). Provider-specific defaults for model/apiKeyEnv/baseUrl apply when provider is `omlx`.
 - **Tool accepts local paths** — `comprehend_image` accepts absolute, `file://`, or current-directory-relative local image paths; remote/data URLs are rejected at tool time.
 - **Auto activation depends on OpenCode provider metadata** — if capability lookup is unavailable and no patterns are configured, auto mode skips image transformation rather than guessing.
 - **`package.json` has no `dependencies`** — only `devDependencies` + `peerDependencies`. Relies on host (OpenCode) to provide peer packages.
@@ -97,4 +97,4 @@ opencode-image-comprehension/
 ## Maintenance Snapshot
 
 - Last verified: 2026-07-12
-- Snapshot: added opt-in `omlx` provider (local oMLX server) alongside the default `ollama-cloud` provider; provider-specific defaults applied in `resolvePluginConfig`; Docker packed-install test and 10-minute CI job caps remain current.
+- Snapshot: added opt-in `omlx` provider alongside default `ollama-cloud`; oMLX auth is optional and omits `Authorization` when unset; provider-specific defaults, Docker packed-install test, and 10-minute CI caps remain current.

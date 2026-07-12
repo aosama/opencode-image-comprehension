@@ -22,9 +22,6 @@ export const DEFAULT_IMAGE_PROMPT = "Describe this image in detail";
 export const DEFAULT_OMLX_URL = "http://localhost:8000/v1/chat/completions";
 export const DEFAULT_OMLX_MODEL = "Ornith-1.0-9B-8bit";
 export const DEFAULT_OMLX_API_KEY_ENV = "OMLX_API_KEY";
-// oMLX defaults to this key and skips verification. Ensures the plugin works
-// in environments (e.g. tmux) where ~/.env_exports is not sourced.
-export const DEFAULT_OMLX_API_KEY = "1234";
 
 // Supported MIME types are the plugin's public image format contract. Any format
 // added here must also be accepted by local-path validation and documented.

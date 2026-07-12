@@ -16,6 +16,7 @@ import {
   parseOllamaCloudDescription,
 } from "../../dist/providers/ollama-cloud.js";
 import {
+  describeImageWithOmlx,
   getOmlxApiKey,
   parseOmlxDescription,
 } from "../../dist/providers/omlx.js";
@@ -449,15 +450,15 @@ test("builds oMLX request in OpenAI-compatible format with data URL", () => {
   );
 });
 
-test("getOmlxApiKey falls back to default 1234 when no config or env key is set", () => {
+test("getOmlxApiKey returns undefined when no optional key is configured", () => {
   // Reproduces the tmux scenario where ~/.env_exports is not sourced and no
   // OMLX_API_KEY is present in the environment.
   const config = __test.resolvePluginConfig({ provider: "omlx" }, null);
 
-  assert.equal(getOmlxApiKey(config, {}), "1234");
+  assert.equal(getOmlxApiKey(config, {}), undefined);
 });
 
-test("getOmlxApiKey prefers config value, then configured env, then OMLX_API_KEY, then default", () => {
+test("getOmlxApiKey prefers config value, then configured env, then OMLX_API_KEY", () => {
   const config = __test.resolvePluginConfig({ provider: "omlx" }, null);
 
   assert.equal(
@@ -480,6 +481,58 @@ test("getOmlxApiKey prefers config value, then configured env, then OMLX_API_KEY
   );
 });
 
+test("oMLX request omits Authorization when no optional key is configured", async () => {
+  const testDirectory = join(
+    tmpdir(),
+    `opencode-image-comprehension-omlx-auth-${Date.now()}`,
+  );
+  const imagePath = join(testDirectory, "fixture.png");
+  await mkdir(testDirectory, { recursive: true });
+  await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+  const originalFetch = globalThis.fetch;
+  const originalOmlxApiKey = process.env.OMLX_API_KEY;
+  const originalConfiguredApiKey = process.env.TEST_OMLX_AUTH_KEY;
+  let requestHeaders;
+
+  delete process.env.OMLX_API_KEY;
+  delete process.env.TEST_OMLX_AUTH_KEY;
+  globalThis.fetch = async (_url, requestInit) => {
+    requestHeaders = requestInit.headers;
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          choices: [{ message: { content: "image description" } }],
+        }),
+    };
+  };
+
+  try {
+    const description = await describeImageWithOmlx({
+      imagePath,
+      directory: testDirectory,
+      prompt: "Describe the image",
+      config: __test.resolvePluginConfig(
+        { provider: "omlx", apiKeyEnv: "TEST_OMLX_AUTH_KEY" },
+        null,
+      ),
+    });
+
+    assert.equal(description, "image description");
+    assert.equal(requestHeaders.Authorization, undefined);
+    assert.equal(requestHeaders["Content-Type"], "application/json");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalOmlxApiKey === undefined) delete process.env.OMLX_API_KEY;
+    else process.env.OMLX_API_KEY = originalOmlxApiKey;
+    if (originalConfiguredApiKey === undefined)
+      delete process.env.TEST_OMLX_AUTH_KEY;
+    else process.env.TEST_OMLX_AUTH_KEY = originalConfiguredApiKey;
+  }
+});
+
 test("parseOmlxDescription extracts trimmed content from choices[0].message.content", () => {
   assert.equal(
     parseOmlxDescription({
@@ -493,10 +546,7 @@ test("parseOmlxDescription extracts trimmed content from choices[0].message.cont
     }),
     undefined,
   );
-  assert.equal(
-    parseOmlxDescription({ choices: [{ message: {} }] }),
-    undefined,
-  );
+  assert.equal(parseOmlxDescription({ choices: [{ message: {} }] }), undefined);
   assert.equal(parseOmlxDescription({ choices: [] }), undefined);
   assert.equal(parseOmlxDescription({}), undefined);
   assert.equal(parseOmlxDescription(null), undefined);
