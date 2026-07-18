@@ -20,7 +20,7 @@ export const DEFAULT_IMAGE_PROMPT = "Describe this image in detail";
 // oMLX provider constants. Used when a project configures provider: "omlx"
 // to use a local oMLX server instead of Ollama Cloud.
 export const DEFAULT_OMLX_URL = "http://localhost:8000/v1/chat/completions";
-export const DEFAULT_OMLX_MODEL = "Ornith-1.0-9B-8bit";
+export const DEFAULT_OMLX_MODEL = "Ornith-1.0-9B-6bit";
 export const DEFAULT_OMLX_API_KEY_ENV = "OMLX_API_KEY";
 
 // Supported MIME types are the plugin's public image format contract. Any format

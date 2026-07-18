@@ -10,11 +10,11 @@
 4. **With expensive gotchas**, update the guide in the same change that adds, removes, renames, or discovers them.
 5. **For guide-only reorganization**, update `Last verified` but do not invent factual changes.
 
-- Last verified: 2026-07-12 — Docker packed-install test, multi-provider (ollama-cloud default + opt-in omlx), and 10-minute CI job caps are current.
+- Last verified: 2026-07-18 — oMLX default model switched to Ornith-1.0-9B-6bit (DRYed via DEFAULT_OMLX_MODEL in src/constants.ts; tests import it from there).
 
 ## Project Overview
 
-A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM models. It intercepts pasted images, saves them as local files, strips unsupported image media from the message, and injects file-path instructions that guide the LLM to call `comprehend_image` with `image_path` and its own `prompt`; the tool calls a configurable vision provider. The default provider is `ollama-cloud` (Ollama Cloud, model `gemma4:31b`); an opt-in `omlx` provider targets a local oMLX server (OpenAI-compatible API, model `Ornith-1.0-9B-8bit`). Keep `src/index.ts` as entry wiring only; behavior lives in focused modules under `src/`.
+A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM models. It intercepts pasted images, saves them as local files, strips unsupported image media from the message, and injects file-path instructions that guide the LLM to call `comprehend_image` with `image_path` and its own `prompt`; the tool calls a configurable vision provider. The default provider is `ollama-cloud` (Ollama Cloud, model `gemma4:31b`); an opt-in `omlx` provider targets a local oMLX server (OpenAI-compatible API, model `Ornith-1.0-9B-6bit`). The model name lives as a single constant (`DEFAULT_OMLX_MODEL`) in `src/constants.ts` — change it there, not in docs or tests. Keep `src/index.ts` as entry wiring only; behavior lives in focused modules under `src/`.
 
 ## Known Gotchas
 

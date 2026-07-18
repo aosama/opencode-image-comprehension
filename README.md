@@ -90,7 +90,7 @@ Create a config file at either location (project config takes precedence):
 | Option           | Type       | Default                         | Description                                                                                                     |
 | ---------------- | ---------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `provider`       | `string`   | `"ollama-cloud"`                | Vision provider. `ollama-cloud` (default, Ollama Cloud) or `omlx` (local oMLX server)                           |
-| `model`          | `string`   | `"gemma4:31b"`                  | Vision model to use for image analysis. Defaults to `Ornith-1.0-9B-8bit` when `provider` is `omlx`              |
+| `model`          | `string`   | `"gemma4:31b"`                  | Vision model to use for image analysis. Defaults to `Ornith-1.0-9B-6bit` when `provider` is `omlx`              |
 | `apiKey`         | `string`   | _(env)_                         | API key value. Prefer `apiKeyEnv` or environment variables instead of committing this                           |
 | `apiKeyEnv`      | `string`   | `"OLLAMA_CLOUD_API_KEY"`        | Environment variable to read the API key from. Defaults to `OMLX_API_KEY` when `provider` is `omlx`             |
 | `baseUrl`        | `string`   | `"https://ollama.com/api/chat"` | Provider chat endpoint. Defaults to `http://localhost:8000/v1/chat/completions` when `provider` is `omlx`       |
@@ -139,7 +139,7 @@ With just that one line, the plugin automatically uses oMLX-appropriate defaults
 
 | Field       | oMLX default                                |
 | ----------- | ------------------------------------------- |
-| `model`     | `Ornith-1.0-9B-8bit`                        |
+| `model`     | `Ornith-1.0-9B-6bit`                        |
 | `baseUrl`   | `http://localhost:8000/v1/chat/completions` |
 | `apiKeyEnv` | `OMLX_API_KEY`                              |
 

@@ -20,6 +20,7 @@ import {
   getOmlxApiKey,
   parseOmlxDescription,
 } from "../../dist/providers/omlx.js";
+import { DEFAULT_OMLX_MODEL } from "../../dist/constants.js";
 
 test("resolves Ollama Cloud config with legacy visionModel fallback", () => {
   const config = __test.resolvePluginConfig(
@@ -401,7 +402,7 @@ test("configuring provider omlx resolves to oMLX defaults for model, url, and ap
   const config = __test.resolvePluginConfig({ provider: "omlx" }, null);
 
   assert.equal(config.provider, "omlx");
-  assert.equal(config.model, "Ornith-1.0-9B-8bit");
+  assert.equal(config.model, DEFAULT_OMLX_MODEL);
   assert.equal(config.baseUrl, "http://localhost:8000/v1/chat/completions");
   assert.equal(config.apiKeyEnv, "OMLX_API_KEY");
 });
@@ -426,13 +427,13 @@ test("omlx provider lets explicit config override oMLX defaults", () => {
 test("builds oMLX request in OpenAI-compatible format with data URL", () => {
   assert.deepEqual(
     __test.buildOmlxRequest({
-      model: "Ornith-1.0-9B-8bit",
+      model: DEFAULT_OMLX_MODEL,
       prompt: "What is shown?",
       imageBase64: "aW1hZ2U=",
       mimeType: "image/png",
     }),
     {
-      model: "Ornith-1.0-9B-8bit",
+      model: DEFAULT_OMLX_MODEL,
       stream: false,
       messages: [
         {
