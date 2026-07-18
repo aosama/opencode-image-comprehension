@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -20,7 +20,11 @@ import {
   getOmlxApiKey,
   parseOmlxDescription,
 } from "../../dist/providers/omlx.js";
-import { DEFAULT_OMLX_MODEL } from "../../dist/constants.js";
+import {
+  DEFAULT_OMLX_MODEL,
+  IMAGE_FILENAME_PREFIX,
+  IMAGE_FILENAME_SHORT_ID_LENGTH,
+} from "../../dist/constants.js";
 
 test("resolves Ollama Cloud config with legacy visionModel fallback", () => {
   const config = __test.resolvePluginConfig(
@@ -172,6 +176,205 @@ test("plugin instances keep their resolved configs isolated", async () => {
   assert.equal(toolMetadata.metadata.model, "first-vision-model");
 });
 
+test("vision-model tool guard is isolated by session", async () => {
+  const testDirectory = join(
+    tmpdir(),
+    `opencode-image-comprehension-session-guard-${Date.now()}`,
+  );
+  await mkdir(testDirectory, { recursive: true });
+
+  const client = {
+    app: { log: async () => undefined },
+    provider: {
+      list: async () => ({
+        data: {
+          all: [
+            {
+              id: "vision-provider",
+              models: {
+                "vision-model": {
+                  capabilities: { input: { image: true } },
+                },
+              },
+            },
+            {
+              id: "text-provider",
+              models: {
+                "text-model": {
+                  capabilities: { input: { image: false } },
+                },
+              },
+            },
+          ],
+        },
+      }),
+    },
+  };
+
+  const plugin = await ImageComprehensionPlugin({
+    client,
+    directory: testDirectory,
+  });
+
+  await plugin["experimental.chat.messages.transform"](
+    {},
+    {
+      messages: [
+        {
+          info: {
+            id: "vision-message",
+            sessionID: "vision-session",
+            role: "user",
+            model: {
+              providerID: "vision-provider",
+              modelID: "vision-model",
+            },
+          },
+          parts: [{ id: "vision-text", type: "text", text: "describe" }],
+        },
+      ],
+    },
+  );
+
+  await plugin["experimental.chat.messages.transform"](
+    {},
+    {
+      messages: [
+        {
+          info: {
+            id: "text-message",
+            sessionID: "text-session",
+            role: "user",
+            model: {
+              providerID: "text-provider",
+              modelID: "text-model",
+            },
+          },
+          parts: [{ id: "text", type: "text", text: "describe" }],
+        },
+      ],
+    },
+  );
+
+  const toolResult = await plugin.tool.comprehend_image.execute(
+    { image_path: "fixture.png", prompt: "describe" },
+    {
+      sessionID: "vision-session",
+      messageID: "vision-message",
+      agent: "build",
+      directory: testDirectory,
+      worktree: testDirectory,
+      abort: new AbortController().signal,
+      metadata: () => undefined,
+      ask: async () => undefined,
+    },
+  );
+
+  assert.equal(toolResult.metadata.blocked, true);
+  assert.match(toolResult.output, /vision-capable model/);
+});
+
+test("vision-model system prompt forbids comprehend_image fallback", async () => {
+  const testDirectory = join(
+    tmpdir(),
+    `opencode-image-comprehension-system-${Date.now()}`,
+  );
+  await mkdir(testDirectory, { recursive: true });
+
+  const client = {
+    app: { log: async () => undefined },
+    provider: { list: async () => ({ data: { all: [] } }) },
+  };
+  const plugin = await ImageComprehensionPlugin({
+    client,
+    directory: testDirectory,
+  });
+
+  const output = { system: [] };
+  await plugin["experimental.chat.system.transform"](
+    {
+      sessionID: "vision-session",
+      model: {
+        id: "vision-model",
+        providerID: "vision-provider",
+        capabilities: {
+          input: { image: true },
+        },
+      },
+    },
+    output,
+  );
+
+  assert.equal(output.system.length, 1);
+  assert.match(output.system[0], /Do not call comprehend_image/);
+  assert.match(output.system[0], /OpenCode model metadata says/);
+});
+
+test("message transform preserves system vision guard when provider metadata is missing", async () => {
+  const testDirectory = join(
+    tmpdir(),
+    `opencode-image-comprehension-system-guard-${Date.now()}`,
+  );
+  await mkdir(testDirectory, { recursive: true });
+
+  const client = {
+    app: { log: async () => undefined },
+    provider: { list: async () => ({ data: { all: [] } }) },
+  };
+  const plugin = await ImageComprehensionPlugin({
+    client,
+    directory: testDirectory,
+  });
+
+  await plugin["experimental.chat.system.transform"](
+    {
+      sessionID: "vision-session",
+      model: {
+        id: "vision-model",
+        providerID: "vision-provider",
+        capabilities: { input: { image: true } },
+      },
+    },
+    { system: [] },
+  );
+
+  await plugin["experimental.chat.messages.transform"](
+    {},
+    {
+      messages: [
+        {
+          info: {
+            id: "message",
+            sessionID: "vision-session",
+            role: "user",
+            model: {
+              providerID: "vision-provider",
+              modelID: "vision-model",
+            },
+          },
+          parts: [{ id: "text", type: "text", text: "describe" }],
+        },
+      ],
+    },
+  );
+
+  const toolResult = await plugin.tool.comprehend_image.execute(
+    { image_path: "missing.png", prompt: "describe" },
+    {
+      sessionID: "vision-session",
+      messageID: "message",
+      agent: "build",
+      directory: testDirectory,
+      worktree: testDirectory,
+      abort: new AbortController().signal,
+      metadata: () => undefined,
+      ask: async () => undefined,
+    },
+  );
+
+  assert.equal(toolResult.metadata.blocked, true);
+});
+
 test("message transform strips latest image parts and injects image_path instructions", async () => {
   const messages = [
     {
@@ -298,6 +501,82 @@ test("message transform leaves native vision model image parts unchanged", async
   assert.equal(messages[0].parts[0].text, "Describe this image");
 });
 
+test("plugin transform preserves native vision model image parts byte-for-byte", async () => {
+  const testDirectory = join(
+    tmpdir(),
+    `opencode-image-comprehension-vlm-preserve-${Date.now()}`,
+  );
+  await mkdir(testDirectory, { recursive: true });
+
+  const client = {
+    app: { log: async () => undefined },
+    provider: {
+      list: async () => ({
+        data: {
+          all: [
+            {
+              id: "omlx",
+              models: {
+                "Ornith-1.0-35B-OptiQ-4bit": {
+                  modalities: { input: ["text", "image"] },
+                },
+              },
+            },
+          ],
+        },
+      }),
+    },
+  };
+  const plugin = await ImageComprehensionPlugin({
+    client,
+    directory: testDirectory,
+  });
+  const messages = [
+    {
+      info: {
+        id: "message",
+        sessionID: "session",
+        role: "user",
+        model: {
+          providerID: "omlx",
+          modelID: "Ornith-1.0-35B-OptiQ-4bit",
+        },
+      },
+      parts: [
+        {
+          id: "text",
+          sessionID: "session",
+          messageID: "message",
+          type: "text",
+          text: "Describe this exact image",
+        },
+        {
+          id: "image",
+          sessionID: "session",
+          messageID: "message",
+          type: "file",
+          mime: "image/jpeg",
+          filename: "vCO7V.jpg",
+          url: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD=",
+          source: {
+            type: "file",
+            path: "/Users/ahmedhamdy/Downloads/vCO7V.jpg",
+            text: { start: 0, end: 9, value: "[Image 1]" },
+          },
+        },
+      ],
+    },
+  ];
+  const before = structuredClone(messages);
+
+  await plugin["experimental.chat.messages.transform"](
+    {},
+    { messages },
+  );
+
+  assert.deepEqual(messages, before);
+});
+
 test("image materialization saves data URL parts and skips unsupported URL schemes", async () => {
   const savedImages = await extractImagesFromParts(
     [
@@ -322,6 +601,160 @@ test("image materialization saves data URL parts and skips unsupported URL schem
   assert.equal(savedImages[0].partId, "data-image");
   assert.match(savedImages[0].path, /\.png$/);
   assert.equal(existsSync(savedImages[0].path), true);
+});
+
+test("materialized image filename is chronologically sortable and human-readable", async () => {
+  // Filenames must be lexically sortable (= chronological) and readable so
+  // LLMs can find the latest image and reproduce the path without copying
+  // 36 random hex chars. Format: image-YYYYMMDD-HHMMSS-xxxxxxxx.<ext>
+  const savedImages = await extractImagesFromParts(
+    [
+      {
+        id: "data-image-naming",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+  );
+
+  assert.equal(savedImages.length, 1);
+  const filename = savedImages[0].path.split("/").pop() ?? "";
+  // Lexically sortable timestamp prefix: image-20260718-150512-...
+  assert.match(
+    filename,
+    new RegExp(
+      `^${IMAGE_FILENAME_PREFIX}\\d{8}-\\d{6}-[0-9a-f]{${IMAGE_FILENAME_SHORT_ID_LENGTH}}\\.png$`,
+    ),
+  );
+  // Must NOT be a bare UUID — the old format was gibberish to LLMs.
+  assert.doesNotMatch(
+    filename,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
+  );
+});
+
+test("multiple images saved in the same second get distinct formatted filenames", async () => {
+  // Two images materialized within the same second must still produce distinct
+  // filenames because the timestamp is paired with a collision-safe suffix.
+  const first = await extractImagesFromParts(
+    [
+      {
+        id: "img-a",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+  );
+  const second = await extractImagesFromParts(
+    [
+      {
+        id: "img-b",
+        type: "file",
+        mime: "image/jpeg",
+        url: "data:image/jpeg;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+  );
+
+  const nameA = first[0].path.split("/").pop() ?? "";
+  const nameB = second[0].path.split("/").pop() ?? "";
+  assert.notEqual(nameA, nameB);
+  // Both must match the new format (jpeg extension for the second one).
+  assert.match(
+    nameB,
+    new RegExp(
+      `^${IMAGE_FILENAME_PREFIX}\\d{8}-\\d{6}-[0-9a-f]{${IMAGE_FILENAME_SHORT_ID_LENGTH}}\\.jpg$`,
+    ),
+  );
+});
+
+test("stale temp images older than the TTL are removed at cleanup", async () => {
+  // The cleanup sweep protects LLMs from reasoning over a pile of stale
+  // files. Files older than the TTL must be deleted; fresh files kept.
+  const testSweepDir = join(
+    tmpdir(),
+    `opencode-image-comprehension-test-sweep-${Date.now()}`,
+  );
+  await mkdir(testSweepDir, { recursive: true });
+  // Plant a stale file (mtime set to 2 days ago) and a fresh file (now).
+  const stalePath = join(testSweepDir, "image-stale.png");
+  const freshPath = join(testSweepDir, "image-fresh.png");
+  await writeFile(stalePath, Buffer.from("stale"));
+  await writeFile(freshPath, Buffer.from("fresh"));
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const { sweepStaleTempImages } = await import(
+    "../../dist/image-materialization.js"
+  );
+  await utimes(stalePath, twoDaysAgo, twoDaysAgo);
+
+  await sweepStaleTempImages({
+    directory: testSweepDir,
+    ttlHours: 24,
+    log: () => undefined,
+  });
+
+  assert.equal(existsSync(stalePath), false, "stale file should be removed");
+  assert.equal(existsSync(freshPath), true, "fresh file should be kept");
+
+  // Cleanup the test dir.
+  try {
+    await unlink(freshPath);
+  } catch {
+    // ignore
+  }
+});
+
+test("stale temp cleanup removes legacy UUID-named images", async () => {
+  // The plugin used to materialize images as bare UUID filenames. Cleanup must
+  // remove those stale files too, otherwise old artifacts keep polluting the
+  // dedicated temp directory after users upgrade to sortable filenames.
+  const testSweepDir = join(
+    tmpdir(),
+    `opencode-image-comprehension-legacy-sweep-${Date.now()}`,
+  );
+  await mkdir(testSweepDir, { recursive: true });
+
+  const legacyImagePath = join(
+    testSweepDir,
+    "123e4567-e89b-12d3-a456-426614174000.png",
+  );
+  const unrelatedPath = join(testSweepDir, "not-an-image.txt");
+  await writeFile(legacyImagePath, Buffer.from("legacy"));
+  await writeFile(unrelatedPath, Buffer.from("keep"));
+  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  await utimes(legacyImagePath, twoDaysAgo, twoDaysAgo);
+  await utimes(unrelatedPath, twoDaysAgo, twoDaysAgo);
+
+  const { sweepStaleTempImages } = await import(
+    "../../dist/image-materialization.js"
+  );
+  await sweepStaleTempImages({
+    directory: testSweepDir,
+    ttlHours: 24,
+    log: () => undefined,
+  });
+
+  assert.equal(
+    existsSync(legacyImagePath),
+    false,
+    "legacy image should be removed",
+  );
+  assert.equal(
+    existsSync(unrelatedPath),
+    true,
+    "unrelated file should be kept",
+  );
+
+  try {
+    await unlink(unrelatedPath);
+  } catch {
+    // ignore
+  }
 });
 
 test("local image path resolver rejects remote and data URL inputs", async () => {

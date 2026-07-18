@@ -1,9 +1,16 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import type { Message, Part } from "@opencode-ai/sdk";
+import type { Message, Model, Part } from "@opencode-ai/sdk";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveModelInfo } from "./activation.js";
-import { PLUGIN_NAME } from "./constants.js";
 import { createComprehendImageTool } from "./comprehend-tool.js";
 import { loadPluginConfig } from "./config.js";
+import {
+  DEFAULT_TEMP_IMAGE_TTL_HOURS,
+  PLUGIN_NAME,
+  TEMP_DIR_NAME,
+} from "./constants.js";
+import { sweepStaleTempImages } from "./image-materialization.js";
 import { transformMessagesForImageComprehension } from "./message-transform.js";
 import type { Logger } from "./types.js";
 export { __test } from "./test-exports.js";
@@ -23,6 +30,32 @@ function findLastUserMessage(
       return messages[messageIndex];
   }
   return undefined;
+}
+
+function sdkModelSupportsImageInput(model: Model): boolean {
+  return model.capabilities.input.image === true;
+}
+
+function rememberKnownSessionVisionCapability(
+  modelSupportsImageInputBySessionID: Map<string, boolean>,
+  sessionID: string | undefined,
+  supportsImageInput: boolean | undefined,
+): void {
+  // The messages transform may only have a provider/model identity, while the
+  // system transform receives richer SDK metadata. Do not overwrite a known
+  // capability from one hook with "unknown" from another hook; only explicit
+  // true/false values should update the session guard.
+  if (!sessionID || typeof supportsImageInput !== "boolean") return;
+  modelSupportsImageInputBySessionID.set(sessionID, supportsImageInput);
+}
+
+function createVisionModelSystemInstruction(): string {
+  return [
+    "OpenCode model metadata says this active model supports native image input.",
+    "When the user attaches an image, including with #/local/path# attachment syntax, inspect the attached image directly from your multimodal context.",
+    "Do not call comprehend_image. Do not call read to re-open attached images.",
+    "Do not decide you are text-only from the model name; follow OpenCode's image-capability metadata for this session.",
+  ].join(" ");
 }
 
 export const ImageComprehensionPlugin: Plugin = async (input) => {
@@ -51,13 +84,33 @@ export const ImageComprehensionPlugin: Plugin = async (input) => {
     `Plugin initialized with ${pluginConfig.provider} model '${pluginConfig.model}'`,
   );
 
+  // Best-effort cleanup of stale materialized images before this session adds
+  // new ones. Failures are swallowed inside the sweep so a non-writable or
+  // missing temp dir never blocks plugin startup.
+  await sweepStaleTempImages({
+    directory: join(tmpdir(), TEMP_DIR_NAME),
+    ttlHours: DEFAULT_TEMP_IMAGE_TTL_HOURS,
+    log,
+  }).catch(() => {});
+
+  // Track each session's current model capability so we can block
+  // vision-capable models from calling comprehend_image. The tool is always
+  // registered (the plugin API does not support conditional registration), but
+  // vision models should look at images natively instead of routing through
+  // this fallback tool. A map is required because OpenCode can interleave
+  // multiple sessions in one plugin instance.
+  const modelSupportsImageInputBySessionID = new Map<string, boolean>();
+
   return {
     tool: {
-      // This is the tool the non-vision model sees. The message transform below
-      // gives the model concrete local file paths and tells it to choose the
-      // visual prompt itself, then this tool executes that chosen prompt against
-      // the configured vision provider.
-      comprehend_image: createComprehendImageTool(() => pluginConfig),
+      // This tool is a FALLBACK for text-only models. Vision-capable models
+      // should look at images directly. The tool itself blocks calls from
+      // vision models and tells them to look at the image natively instead.
+      comprehend_image: createComprehendImageTool(
+        () => pluginConfig,
+        (context) =>
+          modelSupportsImageInputBySessionID.get(context.sessionID) === true,
+      ),
     },
 
     "experimental.chat.messages.transform": async (_input, output) => {
@@ -68,6 +121,18 @@ export const ImageComprehensionPlugin: Plugin = async (input) => {
       const model = result
         ? await resolveModelInfo(client, result, warn)
         : undefined;
+
+      // Track this session's vision capability for the tool guard above. This
+      // runs on every chat turn, so the map stays current if the user switches
+      // models mid-session.
+      if (result) {
+        rememberKnownSessionVisionCapability(
+          modelSupportsImageInputBySessionID,
+          result.info.sessionID,
+          model?.supportsImageInput,
+        );
+      }
+
       await transformMessagesForImageComprehension({
         messages: output.messages,
         config: pluginConfig,
@@ -75,6 +140,20 @@ export const ImageComprehensionPlugin: Plugin = async (input) => {
         model,
         log,
       });
+    },
+
+    "experimental.chat.system.transform": async (systemInput, systemOutput) => {
+      const modelSupportsImageInput = sdkModelSupportsImageInput(
+        systemInput.model,
+      );
+      rememberKnownSessionVisionCapability(
+        modelSupportsImageInputBySessionID,
+        systemInput.sessionID,
+        modelSupportsImageInput,
+      );
+      if (!modelSupportsImageInput) return;
+
+      systemOutput.system.push(createVisionModelSystemInstruction());
     },
   };
 };

@@ -10,7 +10,7 @@
 4. **With expensive gotchas**, update the guide in the same change that adds, removes, renames, or discovers them.
 5. **For guide-only reorganization**, update `Last verified` but do not invent factual changes.
 
-- Last verified: 2026-07-18 — oMLX default model switched to Ornith-1.0-9B-6bit (DRYed via DEFAULT_OMLX_MODEL in src/constants.ts; tests import it from there).
+- Last verified: 2026-07-18 — oMLX default model switched to Ornith-1.0-9B-6bit (DRYed via DEFAULT_OMLX_MODEL in src/constants.ts; tests import it from there). Materialized image filenames are now sortable (`image-YYYYMMDD-HHMMSS-xxxxxxxx.<ext>`); stale temp images older than 24h (including legacy UUID names) are swept at plugin startup; vision-model fallback blocking is session-scoped and reinforced by a system instruction.
 
 ## Project Overview
 
@@ -25,7 +25,7 @@ A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM
 - **`ollama-cloud` is the default provider** — the public npm package must keep working for all users. `omlx` is opt-in via project/user config.
 - **oMLX specifics** — authentication is optional; without `apiKey` or `OMLX_API_KEY`, the plugin omits `Authorization`. Uses OpenAI-compatible wire format (content array with `text` + `image_url` data URL; response from `choices[0].message.content`). Provider-specific defaults for model/apiKeyEnv/baseUrl apply when provider is `omlx`.
 - **Tool accepts local paths** — `comprehend_image` accepts absolute, `file://`, or current-directory-relative local image paths; remote/data URLs are rejected at tool time.
-- **Auto activation depends on OpenCode provider metadata** — if capability lookup is unavailable and no patterns are configured, auto mode skips image transformation rather than guessing.
+- **Auto activation depends on OpenCode provider metadata** — if capability lookup is unavailable and no patterns are configured, auto mode skips image transformation rather than guessing; vision-capable sessions also get a system instruction and session-scoped `comprehend_image` guard so interleaved sessions do not leak capability state.
 - **`package.json` has no `dependencies`** — only `devDependencies` + `peerDependencies`. Relies on host (OpenCode) to provide peer packages.
 - **`deep-test.ts` uses string-matching** on stdout for tool-call and description evidence — fragile if model wording changes.
 - **CI split**: `ci.yml` is offline-safe; `test.yml` skips cloud integration if the secret is absent. Both jobs are capped at 10 minutes.
@@ -96,5 +96,5 @@ opencode-image-comprehension/
 
 ## Maintenance Snapshot
 
-- Last verified: 2026-07-12
-- Snapshot: added opt-in `omlx` provider alongside default `ollama-cloud`; oMLX auth is optional and omits `Authorization` when unset; provider-specific defaults, Docker packed-install test, and 10-minute CI caps remain current.
+- Last verified: 2026-07-18
+- Snapshot: native vision image parts stay byte-for-byte intact; `comprehend_image` is fallback-only with session-scoped vision guards; sortable temp filenames and 24h stale cleanup cover new and legacy image artifacts.

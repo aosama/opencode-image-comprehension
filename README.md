@@ -6,16 +6,14 @@ When you paste an image in OpenCode while using a model that doesn't support vis
 
 ## How It Works
 
-```
 1. You paste an image in OpenCode (using a non-vision model)
 2. Plugin detects the model lacks vision capabilities
-3. Plugin saves the image to a local temp file
+3. Plugin saves the image to a local temp file with a chronologically-sortable, human-readable name (e.g. `image-20260718-151541-31c1519f.png`) so the LLM can find the latest image and reproduce the path reliably
 4. Plugin strips the image parts from the message (the model can't handle them anyway)
 5. Plugin injects the local image path and explains the `comprehend_image` tool contract
 6. The LLM calls `comprehend_image` with `image_path` and a prompt it chooses
 7. The tool calls the configured Ollama Cloud vision model and returns text
 8. The LLM uses the tool result to answer your question
-```
 
 ## Prerequisites
 

@@ -7,6 +7,20 @@ export const TOOL_NAME = "comprehend_image";
 export const CONFIG_FILENAME = "opencode-image-comprehension.json";
 export const TEMP_DIR_NAME = "opencode-image-comprehension";
 
+// Materialized image filenames use a timestamp prefix so lexical sort equals
+// chronological order, plus a short random suffix for collision safety when
+// multiple images arrive in the same second. This lets LLMs find the latest
+// image and reason about recency from the path alone.
+export const IMAGE_FILENAME_PREFIX = "image-";
+export const IMAGE_FILENAME_PATTERN = `${IMAGE_FILENAME_PREFIX}YYYYMMDD-HHMMSS-xxxxxxxx`;
+export const IMAGE_FILENAME_SHORT_ID_LENGTH = 8;
+
+// Stale temp-image cleanup. The plugin treats $TMPDIR as ephemeral, but in
+// practice files accumulate across sessions and confuse LLMs that try to
+// reason over the directory listing. At plugin startup we sweep the temp dir
+// and remove image files older than this many hours.
+export const DEFAULT_TEMP_IMAGE_TTL_HOURS = 24;
+
 // Keep defaults in one module so config parsing, docs, tests, and provider calls
 // do not drift independently.
 export const DEFAULT_PROVIDER: "ollama-cloud" = "ollama-cloud";

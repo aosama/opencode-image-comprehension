@@ -1,12 +1,21 @@
 import type { FilePart, Part } from "@opencode-ai/sdk";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   EXTENSION_TO_MIME,
+  IMAGE_FILENAME_PREFIX,
+  IMAGE_FILENAME_SHORT_ID_LENGTH,
   MIME_TO_EXTENSION,
   SUPPORTED_MIME_TYPES,
   TEMP_DIR_NAME,
@@ -40,6 +49,46 @@ function getExtensionForMime(mime: string): string {
   return MIME_TO_EXTENSION[mime.toLowerCase()] ?? "png";
 }
 
+function pad2(value: number): string {
+  // Two-digit zero-pad for timestamp components. Keeps the filename
+  // lexically sortable (e.g. "07" not "7") so string sort equals time sort.
+  return value < 10 ? `0${value}` : String(value);
+}
+
+function buildImageFilename(mime: string): string {
+  // Format: image-YYYYMMDD-HHMMSS-xxxxxxxx.<ext>
+  // - `image-` prefix makes the temp dir self-documenting.
+  // - YYYYMMDD-HHMMSS is lexically sortable (string sort == chronological
+  //   sort) and human-readable, so LLMs can find the latest image and reason
+  //   about recency from the path alone.
+  // - xxxxxxxx is a short random suffix (8 hex chars) for collision safety
+  //   when multiple images arrive in the same second. Short enough to copy
+  //   reliably; long enough that collisions are astronomically unlikely.
+  const now = new Date();
+  const timestamp = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(
+    now.getDate(),
+  )}-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
+  const shortId = randomUUID()
+    .replace(/-/g, "")
+    .slice(0, IMAGE_FILENAME_SHORT_ID_LENGTH);
+  return `${IMAGE_FILENAME_PREFIX}${timestamp}-${shortId}.${getExtensionForMime(mime)}`;
+}
+
+const LEGACY_UUID_IMAGE_FILENAME_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[^.]+$/i;
+
+function isMaterializedImageFilename(filename: string): boolean {
+  // Current files start with image-YYYYMMDD-HHMMSS-..., while older plugin
+  // versions wrote bare UUID filenames. Cleanup should cover both generations,
+  // but still avoid touching unrelated non-image files in the temp directory.
+  const mime = EXTENSION_TO_MIME[extname(filename).toLowerCase()];
+  if (!mime || !SUPPORTED_MIME_TYPES.has(mime)) return false;
+  return (
+    filename.startsWith(IMAGE_FILENAME_PREFIX) ||
+    LEGACY_UUID_IMAGE_FILENAME_PATTERN.test(filename)
+  );
+}
+
 async function ensureTempDir(): Promise<string> {
   // Use the OS temp directory because these files are derived conversation
   // artifacts, not project source files. OpenCode sessions can still reference
@@ -50,10 +99,10 @@ async function ensureTempDir(): Promise<string> {
 }
 
 async function saveImageToTemp(data: Buffer, mime: string): Promise<string> {
-  // Random filenames prevent collisions when several pasted images share the
-  // same original filename or when multiple OpenCode sessions run concurrently.
+  // Chronologically-sortable, human-readable filenames so LLMs can find the
+  // latest image and reproduce the path without copying 36 random hex chars.
   const tempDir = await ensureTempDir();
-  const filename = `${randomUUID()}.${getExtensionForMime(mime)}`;
+  const filename = buildImageFilename(mime);
   const filepath = join(tempDir, filename);
   await writeFile(filepath, data);
   return filepath;
@@ -136,6 +185,60 @@ export async function extractImagesFromParts(
     if (savedImage) savedImages.push(savedImage);
   }
   return savedImages;
+}
+
+export async function sweepStaleTempImages(input: {
+  directory: string;
+  ttlHours: number;
+  log: Logger;
+}): Promise<void> {
+  // Stale temp images accumulate across sessions and confuse LLMs that try to
+  // reason over the directory listing (a pile of old files makes "find the
+  // latest" harder, even with sortable names). At plugin startup we sweep the
+  // temp dir and remove image files older than ttlHours.
+  //
+  // Resilient by design: a missing directory, unreadable entries, or files
+  // that vanish mid-sweep are all ignored — cleanup is best-effort and must
+  // never block plugin startup.
+  if (input.ttlHours <= 0) return;
+  if (!existsSync(input.directory)) return;
+
+  let entries: string[];
+  try {
+    entries = await readdir(input.directory);
+  } catch (error) {
+    input.log(
+      `Temp image cleanup skipped (could not read ${input.directory}): ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  const ttlMs = input.ttlHours * 60 * 60 * 1000;
+  const now = Date.now();
+  let removed = 0;
+
+  for (const entry of entries) {
+    // Only touch files that look like materialized images. Leave anything else
+    // (stray dirs, unrelated files) untouched.
+    if (!isMaterializedImageFilename(entry)) continue;
+    const filepath = join(input.directory, entry);
+    try {
+      const fileStats = await stat(filepath);
+      if (!fileStats.isFile()) continue;
+      const ageMs = now - fileStats.mtimeMs;
+      if (ageMs < ttlMs) continue;
+      await unlink(filepath);
+      removed++;
+    } catch {
+      // Individual file failures are non-fatal: keep sweeping the rest.
+    }
+  }
+
+  if (removed > 0) {
+    input.log(
+      `Temp image cleanup removed ${removed} stale file(s) older than ${input.ttlHours}h`,
+    );
+  }
 }
 
 function mimeFromPath(imagePath: string): string | undefined {

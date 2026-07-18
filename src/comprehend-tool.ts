@@ -4,7 +4,11 @@ import { describeImageWithOllamaCloud } from "./providers/ollama-cloud.js";
 import { describeImageWithOmlx } from "./providers/omlx.js";
 import type { PluginConfig } from "./types.js";
 
-export function createComprehendImageTool(getConfig: () => PluginConfig) {
+export function createComprehendImageTool(
+  getConfig: () => PluginConfig,
+  shouldBlockForVisionModel: (context: { sessionID: string }) => boolean = () =>
+    false,
+) {
   // Pass config through a getter instead of capturing a value at module load.
   // OpenCode constructs tools after plugin startup, and tests may also exercise
   // this factory directly; the getter keeps the tool tied to the latest resolved
@@ -12,9 +16,11 @@ export function createComprehendImageTool(getConfig: () => PluginConfig) {
   return tool({
     description:
       "Analyze a local image file and return a detailed text answer. " +
-      "Use this tool when you need to inspect an image path mentioned in the conversation or any local image path. " +
+      "This tool is a FALLBACK for text-only models that cannot see images natively. " +
+      "If you are a vision-capable model and the image is attached to your context, look at it directly — do NOT call this tool. " +
+      "Only use this tool when you genuinely cannot see the image and need a text description of it. " +
       "The image_path can be absolute, file://, or relative to the current OpenCode directory. " +
-      "Supports PNG, JPEG, GIF, WebP, and BMP formats. Choose the prompt based on what you need to learn from the image.",
+      "Supports PNG, JPEG, GIF, WebP, and BMP formats.",
     args: {
       image_path: tool.schema
         .string()
@@ -31,6 +37,31 @@ export function createComprehendImageTool(getConfig: () => PluginConfig) {
       // The LLM chooses both the image path and the visual prompt. The plugin's
       // job here is execution and validation, not deciding what should be asked
       // about the image.
+
+      // Guard: if this session is using a vision-capable model, refuse and tell
+      // the model to look at the image directly. The tool is always registered
+      // (the plugin API doesn't support conditional registration), so vision
+      // models can see it and may try to call it despite the description saying
+      // not to. This guard avoids an unnecessary oMLX round-trip even if host
+      // before-hooks do not run for plugin-defined tools.
+      if (shouldBlockForVisionModel(context)) {
+        context.metadata({
+          title: "Image Comprehension",
+          metadata: {
+            step: "blocked",
+            reason: "vision-capable model should look at the image directly",
+          },
+        });
+        return {
+          output:
+            "This tool is a fallback for text-only models. You are a vision-capable model — look at the image directly instead of calling this tool. " +
+            "If the image was pasted as an attachment, it should already be in your context as an image part. " +
+            "If the image is at a local file path, use your native vision capability to read and describe it. " +
+            "Do not call comprehend_image again.",
+          metadata: { blocked: true },
+        };
+      }
+
       const config = getConfig();
       const prompt = args.prompt || DEFAULT_IMAGE_PROMPT;
       // Metadata is surfaced in OpenCode's tool UI/log stream. Keep it concise
