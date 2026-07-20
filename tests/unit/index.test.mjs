@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, unlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -24,7 +24,26 @@ import {
   DEFAULT_OMLX_MODEL,
   IMAGE_FILENAME_PREFIX,
   IMAGE_FILENAME_SHORT_ID_LENGTH,
+  TEMP_DIR_NAME,
 } from "../../dist/constants.js";
+
+// Helper to clean up image materialization fixtures created during tests.
+// Tests that call extractImagesFromParts write to $TMPDIR/opencode-image-comprehension/
+// (or session subdirs). We clean those up so the temp dir doesn't accumulate.
+async function cleanImageFixtures() {
+  const base = join(tmpdir(), TEMP_DIR_NAME);
+  if (!existsSync(base)) return;
+  const entries = await readdir(base);
+  for (const entry of entries) {
+    const fullPath = join(base, entry);
+    const s = await stat(fullPath);
+    if (s.isDirectory()) {
+      await rm(fullPath, { recursive: true, force: true });
+    } else {
+      await unlink(fullPath);
+    }
+  }
+}
 
 test("resolves Ollama Cloud config with legacy visionModel fallback", () => {
   const config = __test.resolvePluginConfig(
@@ -601,6 +620,8 @@ test("image materialization saves data URL parts and skips unsupported URL schem
   assert.equal(savedImages[0].partId, "data-image");
   assert.match(savedImages[0].path, /\.png$/);
   assert.equal(existsSync(savedImages[0].path), true);
+
+  await cleanImageFixtures();
 });
 
 test("materialized image filename is chronologically sortable and human-readable", async () => {
@@ -631,8 +652,10 @@ test("materialized image filename is chronologically sortable and human-readable
   // Must NOT be a bare UUID — the old format was gibberish to LLMs.
   assert.doesNotMatch(
     filename,
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[1-9][0-9a-f]{11}/,
   );
+
+  await cleanImageFixtures();
 });
 
 test("multiple images saved in the same second get distinct formatted filenames", async () => {
@@ -671,30 +694,34 @@ test("multiple images saved in the same second get distinct formatted filenames"
       `^${IMAGE_FILENAME_PREFIX}\\d{8}-\\d{6}-[0-9a-f]{${IMAGE_FILENAME_SHORT_ID_LENGTH}}\\.jpg$`,
     ),
   );
+
+  await cleanImageFixtures();
 });
 
 test("stale temp images older than the TTL are removed at cleanup", async () => {
   // The cleanup sweep protects LLMs from reasoning over a pile of stale
   // files. Files older than the TTL must be deleted; fresh files kept.
+  // The default TTL is 1 hour — ephemeral conversation artifacts should not
+  // accumulate across sessions.
   const testSweepDir = join(
     tmpdir(),
     `opencode-image-comprehension-test-sweep-${Date.now()}`,
   );
   await mkdir(testSweepDir, { recursive: true });
-  // Plant a stale file (mtime set to 2 days ago) and a fresh file (now).
+  // Plant a stale file (mtime set to 2 hours ago) and a fresh file (now).
   const stalePath = join(testSweepDir, "image-stale.png");
   const freshPath = join(testSweepDir, "image-fresh.png");
   await writeFile(stalePath, Buffer.from("stale"));
   await writeFile(freshPath, Buffer.from("fresh"));
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
   const { sweepStaleTempImages } = await import(
     "../../dist/image-materialization.js"
   );
-  await utimes(stalePath, twoDaysAgo, twoDaysAgo);
+  await utimes(stalePath, twoHoursAgo, twoHoursAgo);
 
   await sweepStaleTempImages({
     directory: testSweepDir,
-    ttlHours: 24,
+    ttlHours: 1,
     log: () => undefined,
   });
 
@@ -713,6 +740,8 @@ test("stale temp cleanup removes legacy UUID-named images", async () => {
   // The plugin used to materialize images as bare UUID filenames. Cleanup must
   // remove those stale files too, otherwise old artifacts keep polluting the
   // dedicated temp directory after users upgrade to sortable filenames.
+  // The default TTL is 1 hour — ephemeral conversation artifacts should not
+  // accumulate across sessions.
   const testSweepDir = join(
     tmpdir(),
     `opencode-image-comprehension-legacy-sweep-${Date.now()}`,
@@ -726,16 +755,16 @@ test("stale temp cleanup removes legacy UUID-named images", async () => {
   const unrelatedPath = join(testSweepDir, "not-an-image.txt");
   await writeFile(legacyImagePath, Buffer.from("legacy"));
   await writeFile(unrelatedPath, Buffer.from("keep"));
-  const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-  await utimes(legacyImagePath, twoDaysAgo, twoDaysAgo);
-  await utimes(unrelatedPath, twoDaysAgo, twoDaysAgo);
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  await utimes(legacyImagePath, twoHoursAgo, twoHoursAgo);
+  await utimes(unrelatedPath, twoHoursAgo, twoHoursAgo);
 
   const { sweepStaleTempImages } = await import(
     "../../dist/image-materialization.js"
   );
   await sweepStaleTempImages({
     directory: testSweepDir,
-    ttlHours: 24,
+    ttlHours: 1,
     log: () => undefined,
   });
 
@@ -984,4 +1013,265 @@ test("parseOmlxDescription extracts trimmed content from choices[0].message.cont
   assert.equal(parseOmlxDescription({ choices: [] }), undefined);
   assert.equal(parseOmlxDescription({}), undefined);
   assert.equal(parseOmlxDescription(null), undefined);
+});
+
+test("extractImagesFromParts places materialized images in a session-scoped directory", async () => {
+  // When a sessionID is provided, materialized images must land in
+  // $TMPDIR/opencode-image-comprehension/<sessionID>/, not in the flat root.
+  // This lets session cleanup wipe the whole directory when the session ends.
+  const savedImages = await extractImagesFromParts(
+    [
+      {
+        id: "session-image",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+    "test-session-abc",
+  );
+
+  assert.equal(savedImages.length, 1);
+  assert.equal(savedImages[0].sessionID, "test-session-abc");
+  assert.match(
+    savedImages[0].path,
+    /\/opencode-image-comprehension\/test-session-abc\//,
+  );
+  assert.match(savedImages[0].path, /\/image-\d{8}-\d{6}-[0-9a-f]+\.png$/);
+  assert.equal(existsSync(savedImages[0].path), true);
+
+  await cleanImageFixtures();
+});
+
+test("extractImagesFromParts without sessionID falls back to flat temp dir", async () => {
+  // When no sessionID is given (legacy path), images should still materialize
+  // in the base temp directory so existing tests and behavior are preserved.
+  const savedImages = await extractImagesFromParts(
+    [
+      {
+        id: "flat-image",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+  );
+
+  assert.equal(savedImages.length, 1);
+  assert.equal(savedImages[0].sessionID, undefined);
+  assert.match(
+    savedImages[0].path,
+    /\/opencode-image-comprehension\/image-\d{8}-\d{6}-[0-9a-f]+\.png$/,
+  );
+  assert.equal(existsSync(savedImages[0].path), true);
+
+  await cleanImageFixtures();
+});
+
+test("two different sessionIDs produce isolated materialized images", async () => {
+  // Images from two concurrent sessions must never share a directory.
+  const first = await extractImagesFromParts(
+    [
+      {
+        id: "img-first",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+    "session-A-1",
+  );
+  const second = await extractImagesFromParts(
+    [
+      {
+        id: "img-second",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+    "session-B-2",
+  );
+
+  assert.notEqual(first[0].sessionID, second[0].sessionID);
+  assert.match(first[0].path, /\/session-A-1\//);
+  assert.match(second[0].path, /\/session-B-2\//);
+  assert.doesNotMatch(first[0].path, /\/session-B-2\//);
+  assert.doesNotMatch(second[0].path, /\/session-A-1\//);
+
+  await cleanImageFixtures();
+});
+
+test("sweepStaleTempImages removes stale files inside session directories", async () => {
+  // Sweep must traverse into per-session subdirectories and clean out any
+  // stale images there, not just files at the base level.
+  const testSweepDir = join(
+    tmpdir(),
+    `opencode-image-comprehension-sweep-session-${Date.now()}`,
+  );
+  const sessionDir = join(testSweepDir, "session-to-clean");
+  await mkdir(sessionDir, { recursive: true });
+
+  const staleFile = join(sessionDir, "image-stale.png");
+  const freshFile = join(sessionDir, "image-fresh.png");
+  await writeFile(staleFile, Buffer.from("stale"));
+  await writeFile(freshFile, Buffer.from("fresh"));
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  await utimes(staleFile, twoHoursAgo, twoHoursAgo);
+
+  const { sweepStaleTempImages } = await import(
+    "../../dist/image-materialization.js"
+  );
+  await sweepStaleTempImages({
+    directory: testSweepDir,
+    ttlHours: 1,
+    log: () => undefined,
+  });
+
+  assert.equal(
+    existsSync(staleFile),
+    false,
+    "stale file inside session dir should be removed",
+  );
+  assert.equal(
+    existsSync(freshFile),
+    true,
+    "fresh file inside session dir should be kept",
+  );
+
+  // Cleanup remaining test artifacts.
+  try {
+    await unlink(freshFile);
+    await unlink(sessionDir);
+    await unlink(testSweepDir);
+  } catch {
+    // ignore
+  }
+});
+
+test("sweepStaleTempImages removes empty session directories", async () => {
+  // When a per-session directory has no image files left (all cleaned or
+  // never created), sweep should remove the empty directory to keep the
+  // temp dir tidy.
+  const testSweepDir = join(
+    tmpdir(),
+    `opencode-image-comprehension-sweep-empty-${Date.now()}`,
+  );
+  await mkdir(testSweepDir, { recursive: true });
+
+  const emptySessionDir = join(testSweepDir, "empty-session");
+  await mkdir(emptySessionDir, { recursive: true });
+
+  // Also plant a non-empty session dir to verify it is NOT removed.
+  const activeSessionDir = join(testSweepDir, "active-session");
+  await mkdir(activeSessionDir, { recursive: true });
+  await writeFile(join(activeSessionDir, "image-some.png"), Buffer.from("keep"));
+
+  const { sweepStaleTempImages } = await import(
+    "../../dist/image-materialization.js"
+  );
+  await sweepStaleTempImages({
+    directory: testSweepDir,
+    ttlHours: 1,
+    log: () => undefined,
+  });
+
+  const postSweepEntries = await readdir(testSweepDir);
+
+  assert.equal(
+    existsSync(emptySessionDir),
+    false,
+    "empty session dir should be removed",
+  );
+  assert.equal(
+    existsSync(activeSessionDir),
+    true,
+    "active session dir should be kept",
+  );
+
+  // Cleanup.
+  try {
+    await unlink(join(activeSessionDir, "image-some.png"));
+    await unlink(activeSessionDir);
+    await unlink(testSweepDir);
+  } catch {
+    // ignore
+  }
+});
+
+test("message transform injects session-scoped path into the LLM prompt", async () => {
+  // The prompt shown to the LLM should reference the session-scoped image
+  // path, so the LLM calls comprehend_image with a path that actually exists.
+  const messages = [
+    {
+      info: {
+        id: "prompt-message",
+        sessionID: "prompt-session-xyz",
+        role: "user",
+      },
+      parts: [
+        {
+          id: "prompt-text",
+          sessionID: "prompt-session-xyz",
+          messageID: "prompt-message",
+          type: "text",
+          text: "What is in this image?",
+        },
+        {
+          id: "prompt-image",
+          type: "file",
+          mime: "image/png",
+          url: "data:image/png;base64,aW1hZ2U=",
+        },
+      ],
+    },
+  ];
+  const logs = [];
+
+  await transformMessagesForImageComprehension({
+    messages,
+    config: __test.resolvePluginConfig({ activation: "force" }, null),
+    configuredModels: undefined,
+    model: undefined,
+    log: (message) => logs.push(message),
+    sessionID: "prompt-session-xyz",
+  });
+
+  const transformedText = messages[0].parts.find(
+    (part) => part.type === "text",
+  ).text;
+  assert.match(
+    transformedText,
+    /\/prompt-session-xyz\//,
+    "prompt must reference the session-scoped image path",
+  );
+  assert.match(transformedText, /comprehend_image/);
+});
+
+test("SavedImage exposes sessionID for session cleanup", async () => {
+  // The SavedImage shape must carry sessionID so callers can drive cleanup
+  // of per-session directories when a session ends.
+  const savedImages = await extractImagesFromParts(
+    [
+      {
+        id: "cleanup-image",
+        type: "file",
+        mime: "image/png",
+        url: "data:image/png;base64,aW1hZ2U=",
+      },
+    ],
+    () => undefined,
+    "cleanup-session",
+  );
+
+  assert.equal(savedImages.length, 1);
+  assert.equal(savedImages[0].sessionID, "cleanup-session");
+  assert.match(savedImages[0].path, /\/cleanup-session\//);
+  assert.equal(existsSync(savedImages[0].path), true);
+
+  await cleanImageFixtures();
 });

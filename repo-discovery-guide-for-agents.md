@@ -4,13 +4,9 @@
 
 ## Maintenance Mandate
 
-1. **Before every commit**, update this guide if changed work affects anything it documents.
-2. **At session start**, spot-check 2-3 key facts before trusting the guide.
-3. **After 90 days**, treat `Last verified` as suspect and re-verify before relying on it.
-4. **With expensive gotchas**, update the guide in the same change that adds, removes, renames, or discovers them.
-5. **For guide-only reorganization**, update `Last verified` but do not invent factual changes.
+Before every commit, update this guide if changed work affects anything it documents. At session start, spot-check 2-3 key facts before trusting the guide. After 90 days, treat `Last verified` as suspect and re-verify. With expensive gotchas, update the guide in the same change that adds, removes, renames, or discovers them. For guide-only reorganization, update `Last verified` but do not invent factual changes.
 
-- Last verified: 2026-07-18 — oMLX default model switched to Ornith-1.0-9B-6bit (DRYed via DEFAULT_OMLX_MODEL in src/constants.ts; tests import it from there). Materialized image filenames are now sortable (`image-YYYYMMDD-HHMMSS-xxxxxxxx.<ext>`); stale temp images older than 24h (including legacy UUID names) are swept at plugin startup; vision-model fallback blocking is session-scoped and reinforced by a system instruction.
+- Last verified: 2026-07-20 — Materialized image temp dirs are session-scoped (`$TMPDIR/opencode-image-comprehension/<sessionID>/`); `SavedImage.sessionID` is optional and threaded through all materialization and sweep paths; `sweepStaleTempImages` recurses into session subdirectories to clean stale files and removes empty session dirs; `handleFileUrl` preserves original paths (no copy). Use `rm({ recursive: true, force: true })` for directory removal — never `unlink()` (EPERM on directories).
 
 ## Project Overview
 
@@ -31,6 +27,8 @@ A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM
 - **CI split**: `ci.yml` is offline-safe; `test.yml` skips cloud integration if the secret is absent. Both jobs are capped at 10 minutes.
 - **Plugin export shape matters**: default export is a v1 object with `id` and `server`; named `__test` exports would break legacy loading if default were just a function.
 - **Agent guidance split**: `AGENTS.md` is intentionally principle-only; the only repo-local instruction file left is the CI/CD constraint.
+- **Session-scoped temp dirs** — materialized images live in `$TMPDIR/opencode-image-comprehension/<sessionID>/`. `SavedImage.sessionID` is optional. `handleDataUrl` copies to the session dir; `handleFileUrl` keeps the original path (no copy). Sweep recursion cleans stale files inside session subdirs and removes empty session dirs.
+- **Use `rm({ recursive: true, force: true })` for directory removal** — never `unlink()` (EPERM on directories).
 
 ## Conventions
 
@@ -96,5 +94,5 @@ opencode-image-comprehension/
 
 ## Maintenance Snapshot
 
-- Last verified: 2026-07-18
-- Snapshot: native vision image parts stay byte-for-byte intact; `comprehend_image` is fallback-only with session-scoped vision guards; sortable temp filenames and 24h stale cleanup cover new and legacy image artifacts.
+- Last verified: 2026-07-20
+- Snapshot: Materialized image temp dirs are session-scoped (`$TMPDIR/opencode-image-comprehension/<sessionID>/`); `SavedImage.sessionID` is threaded through all materialization and sweep paths; `sweepStaleTempImages` recurses into session subdirectories to clean stale files and removes empty session dirs; `handleFileUrl` preserves original paths (no copy). Use `rm({ recursive: true, force: true })` for directory removal — never `unlink()`.

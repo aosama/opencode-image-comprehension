@@ -139,6 +139,7 @@ export const ImageComprehensionPlugin: Plugin = async (input) => {
         configuredModels: pluginConfig.models,
         model,
         log,
+        sessionID: result?.info.sessionID,
       });
     },
 

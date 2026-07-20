@@ -71,6 +71,7 @@ export async function transformMessagesForImageComprehension(input: {
   configuredModels: readonly string[] | undefined;
   model: ModelInfo | undefined;
   log: Logger;
+  sessionID?: string;
 }): Promise<void> {
   // High-level transform contract:
   // 1. Only operate on the latest user message.
@@ -101,6 +102,7 @@ export async function transformMessagesForImageComprehension(input: {
   const savedImages = await extractImagesFromParts(
     lastUserMessage.parts,
     input.log,
+    input.sessionID,
   );
   if (savedImages.length === 0) {
     input.log("No images were successfully saved");

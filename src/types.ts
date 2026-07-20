@@ -33,11 +33,14 @@ export interface RawPluginConfig {
 
 // SavedImage is the bridge between OpenCode message parts and the LLM-visible
 // prompt. `partId` lets the transform remove only the original image part that
-// produced this file path.
+// produced this file path. `sessionID` lets the plugin colocate materialized
+// images with their owning session instead of dumping them into a shared flat
+// temp directory where cleanup is purely wall-clock.
 export interface SavedImage {
   path: string;
   mime: string;
   partId: string;
+  sessionID?: string;
 }
 
 // ResolvedLocalImage is returned after tool-time validation. The provider layer
