@@ -18,3 +18,4 @@ This file should describe durable engineering values, not technical specificatio
 - Keep documentation honest. Update durable guidance when behavior, constraints, or maintenance expectations actually change; avoid duplicating details that belong in code, tests, or release notes.
 - Respect existing work. Do not overwrite, revert, or reinterpret unrelated changes unless explicitly asked.
 - Prefer durable quality over procedural compliance. Use judgment, explain tradeoffs when they matter, and leave the codebase healthier than you found it.
+- Keep source files under 500 lines; decompose into focused sub-modules behind a barrel re-export when a file grows past that limit.

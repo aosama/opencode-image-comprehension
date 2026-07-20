@@ -6,7 +6,7 @@
 
 Before every commit, update this guide if changed work affects anything it documents. At session start, spot-check 2-3 key facts before trusting the guide. After 90 days, treat `Last verified` as suspect and re-verify. With expensive gotchas, update the guide in the same change that adds, removes, renames, or discovers them. For guide-only reorganization, update `Last verified` but do not invent factual changes.
 
-- Last verified: 2026-07-20 — Materialized image temp dirs are session-scoped (`$TMPDIR/opencode-image-comprehension/<sessionID>/`); `SavedImage.sessionID` is optional and threaded through all materialization and sweep paths; `sweepStaleTempImages` recurses into session subdirectories to clean stale files and removes empty session dirs; `handleFileUrl` preserves original paths (no copy). Use `rm({ recursive: true, force: true })` for directory removal — never `unlink()` (EPERM on directories).
+- Last verified: 2026-07-20 — Decomposed image-materialization, config, activation, and index into barrel + sub-modules. All source files now under 180 lines. Pre-commit hook warns on files exceeding 500 lines. All 36 unit tests pass.
 
 ## Project Overview
 
@@ -29,6 +29,8 @@ A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM
 - **Agent guidance split**: `AGENTS.md` is intentionally principle-only; the only repo-local instruction file left is the CI/CD constraint.
 - **Session-scoped temp dirs** — materialized images live in `$TMPDIR/opencode-image-comprehension/<sessionID>/`. `SavedImage.sessionID` is optional. `handleDataUrl` copies to the session dir; `handleFileUrl` keeps the original path (no copy). Sweep recursion cleans stale files inside session subdirs and removes empty session dirs.
 - **Use `rm({ recursive: true, force: true })` for directory removal** — never `unlink()` (EPERM on directories).
+- **Barrel modules preserve public API** — `image-materialization.ts`, `config.ts`, `activation.ts`, and `index.ts` are barrel files that re-export from focused sub-modules. Only originally-public symbols are re-exported from barrels; internal helpers stay in their sub-modules.
+- **Pre-commit hook warns on files exceeding 500 lines** — `.git/hooks/pre-commit` checks staged `.ts` files in `src/`. It is a warning only; it does not block commits.
 
 ## Conventions
 
@@ -37,6 +39,7 @@ A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM
 - **Config precedence**: project-level > user-level > hardcoded defaults. Missing config files are silently skipped.
 - **Synthetic text parts**: replacement text parts set `synthetic: true` to mark plugin-created vs user-created.
 - **Prettier**: double quotes, semicolons always, trailing commas, 80-char width, 2-space tabs. No ESLint.
+- **File size**: source files should stay under 180 lines. Barrel files re-export from focused sub-modules. If a file grows past 200 lines, consider decomposition.
 - **Supported formats**: PNG, JPEG, GIF, WebP, BMP.
 
 ## Structure Map
@@ -44,12 +47,29 @@ A TypeScript OpenCode plugin that enables image comprehension for non-vision LLM
 ```
 opencode-image-comprehension/
 ├── src/
-│   ├── index.ts                     # Plugin entry wiring
-│   ├── config.ts                    # Config parsing and precedence
-│   ├── activation.ts                # Model capability/pattern checks
-│   ├── image-materialization.ts     # Attached image saving and local path validation
+│   ├── index.ts                     # Plugin entry barrel (delegates to plugin-setup, plugin-hooks)
+│   ├── plugin-setup.ts              # Async plugin initialization (config, cleanup, session tracking)
+│   ├── plugin-hooks.ts              # Chat messages transform, system transform, tool creation
+│   ├── config.ts                    # Barrel: re-exports from config-paths, config-parse, config-resolve
+│   ├── config-paths.ts              # getUserConfigPath, getProjectConfigPath
+│   ├── config-parse.ts              # parseConfigObject and all parse* functions
+│   ├── config-resolve.ts            # selectWithPrecedence, resolvePluginConfig, loadPluginConfig
+│   ├── activation.ts                # Barrel: re-exports from activation-patterns, -decide, -resolve
+│   ├── activation-patterns.ts       # Wildcard/pattern matching for model activation
+│   ├── activation-decide.ts         # shouldActivateImageComprehension decision logic
+│   ├── activation-resolve.ts        # Model capability detection, provider metadata lookup
+│   ├── image-materialization.ts     # Barrel: re-exports from image-detection, -save, -process, -sweep, -validate
+│   ├── image-detection.ts           # isImageFilePart, parseBase64DataUrl
+│   ├── image-save.ts                # ensureTempDir, saveImageToTemp, buildImageFilename
+│   ├── image-process.ts             # processImagePart, extractImagesFromParts, handleFile/DataUrl
+│   ├── image-sweep.ts              # sweepStaleTempImages, isMaterializedImageFilename
+│   ├── image-validate.ts            # resolveLocalImagePath, readLocalImage, readLocalImageAsBase64
 │   ├── message-transform.ts         # Non-vision message rewrite
 │   ├── comprehend-tool.ts           # comprehend_image tool definition; dispatches by provider
+│   ├── constants.ts                 # All plugin constants and defaults
+│   ├── types.ts                     # TypeScript interfaces and types
+│   ├── prompt.ts                    # Prompt template generation
+│   ├── test-exports.ts              # Named __test export for unit tests
 │   └── providers/
 │       ├── ollama-cloud.ts          # Ollama Cloud request/response handling (default)
 │       └── omlx.ts                  # oMLX (local OpenAI-compatible) request/response handling
@@ -95,4 +115,4 @@ opencode-image-comprehension/
 ## Maintenance Snapshot
 
 - Last verified: 2026-07-20
-- Snapshot: Materialized image temp dirs are session-scoped (`$TMPDIR/opencode-image-comprehension/<sessionID>/`); `SavedImage.sessionID` is threaded through all materialization and sweep paths; `sweepStaleTempImages` recurses into session subdirectories to clean stale files and removes empty session dirs; `handleFileUrl` preserves original paths (no copy). Use `rm({ recursive: true, force: true })` for directory removal — never `unlink()`.
+- Snapshot: Decomposed image-materialization (was 395 lines → barrel + 5 sub-modules), config (was 282 → barrel + 3), activation (was 149 → barrel + 3), index (was 171 → barrel + 2). All source files now under 180 lines. Pre-commit hook (`.git/hooks/pre-commit`) warns on files exceeding 500 lines. Barrel files preserve public API — `test-exports.ts` imports unchanged. All 36 unit tests pass.

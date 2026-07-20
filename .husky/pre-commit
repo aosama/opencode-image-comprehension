@@ -1,0 +1,22 @@
+#!/bin/bash
+# Warn when TypeScript files in src/ exceed 500 lines.
+# This hook does NOT block commits — it only prints a warning.
+MAX_LINES=500
+FOUND_VIOLATIONS=0
+
+for file in $(git diff --cached --name-only --diff-filter=ACM | grep '\.ts$' | grep '^src/'); do
+  LINE_COUNT=$(wc -l < "$file")
+  if [ "$LINE_COUNT" -gt "$MAX_LINES" ]; then
+    echo "WARNING: $file has $LINE_COUNT lines (exceeds $MAX_LINES line limit)"
+    FOUND_VIOLATIONS=1
+  fi
+done
+
+if [ "$FOUND_VIOLATIONS" -eq 1 ]; then
+  echo ""
+  echo "Large file warning: Consider decomposing files exceeding $MAX_LINES lines."
+  echo "See repo-discovery-guide-for-agents.md for decomposition principles."
+  echo ""
+fi
+
+exit 0  # Always pass — this is a warning, not a block
