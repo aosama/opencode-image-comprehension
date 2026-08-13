@@ -58,6 +58,7 @@ export async function describeImageWithOllamaCloud(input: {
   directory: string;
   prompt: string;
   config: PluginConfig;
+  preparedImage?: { base64: string };
 }): Promise<string> {
   // Provider calls are deliberately late-bound: validate/read the local image,
   // construct one Ollama Cloud request, and return only textual content to the
@@ -69,10 +70,12 @@ export async function describeImageWithOllamaCloud(input: {
     );
   }
 
-  const imageBase64 = await readLocalImageAsBase64({
-    imagePath: input.imagePath,
-    directory: input.directory,
-  });
+  const imageBase64 =
+    input.preparedImage?.base64 ??
+    (await readLocalImageAsBase64({
+      imagePath: input.imagePath,
+      directory: input.directory,
+    }));
   const controller = new AbortController();
   // Bound both network stalls and slow provider responses with the same timeout
   // knob exposed in plugin config. AbortController is used instead of racing

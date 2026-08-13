@@ -4,13 +4,14 @@ import type { Plugin } from "@opencode-ai/plugin";
 // project/user/default precedence has already been applied and optional invalid
 // config values have been discarded.
 export interface PluginConfig {
-  provider: "ollama-cloud" | "omlx";
+  provider: "ollama-cloud" | "omlx" | "optiq";
   models?: string[];
   model: string;
   apiKey?: string;
   apiKeyEnv: string;
   baseUrl: string;
   timeoutSeconds: number;
+  optiqServer: OptiqServerConfig;
   promptTemplate?: string;
   activation: ActivationMode;
 }
@@ -19,7 +20,7 @@ export interface PluginConfig {
 // disk. Individual fields are optional and pre-validated before becoming
 // PluginConfig.
 export interface RawPluginConfig {
-  provider?: "ollama-cloud" | "omlx";
+  provider?: "ollama-cloud" | "omlx" | "optiq";
   models?: string[];
   model?: string;
   visionModel?: string;
@@ -27,6 +28,14 @@ export interface RawPluginConfig {
   apiKeyEnv?: string;
   baseUrl?: string;
   timeoutSeconds?: number;
+  optiqServer?: {
+    managed?: boolean;
+    command?: string;
+    modelPath?: string;
+    host?: string;
+    port?: number;
+    idleTimeoutSeconds?: number;
+  };
   promptTemplate?: string;
   activation?: ActivationMode;
 }
@@ -50,6 +59,15 @@ export interface ResolvedLocalImage {
   mime: string;
 }
 
+// The exact local bytes sent to the vision provider. Keeping this boundary shape
+// together lets the tool report auditable metadata for the same bytes the provider
+// receives, without reading a mutable file twice.
+export interface PreparedLocalImage extends ResolvedLocalImage {
+  base64: string;
+  byteLength: number;
+  sha256: string;
+}
+
 // OpenCode stores the active model identity on user messages. supportsImageInput
 // is added by this plugin after querying provider metadata when available.
 export interface ModelInfo {
@@ -66,6 +84,15 @@ export type ActivationMode = "auto" | "force" | "disabled" | "patterns";
 
 export type Logger = (msg: string) => void;
 export type PluginClient = Parameters<Plugin>[0]["client"];
+
+export interface OptiqServerConfig {
+  managed: boolean;
+  command: string;
+  modelPath: string;
+  host: string;
+  port: number;
+  idleTimeoutSeconds: number;
+}
 
 // Provider metadata shapes intentionally mirror the subset OpenCode exposes via
 // client.provider.list(). Avoid importing a concrete SDK response type here so

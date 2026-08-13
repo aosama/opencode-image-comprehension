@@ -9,15 +9,23 @@ import { createPluginHooks } from "./plugin-hooks.js";
 export const ImageComprehensionPlugin: Plugin = async (input) => {
   const { client, directory } = input;
 
-  const { pluginConfig, log, warn, modelSupportsImageInputBySessionID } =
-    await setupImageComprehensionPlugin({ client, directory });
+  const {
+    pluginConfig,
+    isEnabled,
+    log,
+    warn,
+    modelSupportsImageInputBySessionID,
+    optiqServerLifecycle,
+  } = await setupImageComprehensionPlugin({ client, directory });
 
   const hooks = createPluginHooks({
     pluginConfig,
+    isEnabled,
     log,
     warn,
     modelSupportsImageInputBySessionID,
     client,
+    optiqServerLifecycle,
   });
 
   return hooks;

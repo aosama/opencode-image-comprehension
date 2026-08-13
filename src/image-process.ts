@@ -30,6 +30,8 @@ async function handleDataUrl(
   filePart: FilePart,
   log: Logger,
   sessionID?: string,
+  turnID?: string,
+  imageIndex?: number,
 ): Promise<SavedImage | null> {
   // Data URLs have no filesystem identity. Materializing them is what makes the
   // desired LLM experience possible: the non-vision model can name a file path in
@@ -46,6 +48,8 @@ async function handleDataUrl(
       parsed.data,
       parsed.mime,
       sessionID,
+      turnID,
+      imageIndex,
     );
     log(`Saved pasted image to temp file: ${savedPath}`);
     return {
@@ -66,6 +70,8 @@ async function processImagePart(
   filePart: FilePart,
   log: Logger,
   sessionID?: string,
+  turnID?: string,
+  imageIndex?: number,
 ): Promise<SavedImage | null> {
   // Do not pass through remote URLs here. The tool contract is explicitly local
   // image paths so the LLM has one simple mental model and all provider calls go
@@ -77,7 +83,7 @@ async function processImagePart(
   }
   if (url.startsWith("file://")) return handleFileUrl(url, filePart, log);
   if (url.startsWith("data:"))
-    return handleDataUrl(url, filePart, log, sessionID);
+    return handleDataUrl(url, filePart, log, sessionID, turnID, imageIndex);
   log(`Unsupported URL scheme for part ${filePart.id}: ${url.slice(0, 50)}...`);
   return null;
 }
@@ -86,14 +92,23 @@ export async function extractImagesFromParts(
   parts: Part[],
   log: Logger,
   sessionID?: string,
+  turnID?: string,
 ): Promise<SavedImage[]> {
   // Transform all supported images in the latest user message. If one image
   // fails to materialize, keep processing the rest so a single bad attachment
   // does not discard useful context.
   const savedImages: SavedImage[] = [];
+  let imageIndex = 0;
   for (const part of parts) {
     if (!isImageFilePart(part)) continue;
-    const savedImage = await processImagePart(part, log, sessionID);
+    const savedImage = await processImagePart(
+      part,
+      log,
+      sessionID,
+      turnID,
+      imageIndex,
+    );
+    imageIndex++;
     if (savedImage) savedImages.push(savedImage);
   }
   return savedImages;

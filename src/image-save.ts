@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import {
   IMAGE_FILENAME_PREFIX,
+  CURRENT_IMAGE_FILENAME_PREFIX,
   IMAGE_FILENAME_SHORT_ID_LENGTH,
   MIME_TO_EXTENSION,
   TEMP_DIR_NAME,
@@ -20,7 +21,14 @@ function pad2(value: number): string {
   return value < 10 ? `0${value}` : String(value);
 }
 
-function buildImageFilename(mime: string): string {
+function buildImageFilename(mime: string, imageIndex?: number): string {
+  if (imageIndex !== undefined) {
+    const extension = getExtensionForMime(mime);
+    return imageIndex === 0
+      ? `${CURRENT_IMAGE_FILENAME_PREFIX}.${extension}`
+      : `${CURRENT_IMAGE_FILENAME_PREFIX}-${imageIndex + 1}.${extension}`;
+  }
+
   // Format: image-YYYYMMDD-HHMMSS-xxxxxxxx.<ext>
   // - `image-` prefix makes the temp dir self-documenting.
   // - YYYYMMDD-HHMMSS is lexically sortable (string sort == chronological
@@ -39,7 +47,15 @@ function buildImageFilename(mime: string): string {
   return `${IMAGE_FILENAME_PREFIX}${timestamp}-${shortId}.${getExtensionForMime(mime)}`;
 }
 
-async function ensureTempDir(sessionID?: string): Promise<string> {
+function safePathSegment(pathSegment: string): string {
+  const safeSegment = pathSegment.replace(/[^A-Za-z0-9_-]/g, "_");
+  return safeSegment || "unknown";
+}
+
+async function ensureTempDir(
+  sessionID?: string,
+  turnID?: string,
+): Promise<string> {
   // Use the OS temp directory because these files are derived conversation
   // artifacts, not project source files. With a sessionID we colocate the
   // materialized image in a per-session subdirectory so it gets swept out
@@ -48,9 +64,12 @@ async function ensureTempDir(sessionID?: string): Promise<string> {
   const parent = join(tmpdir(), TEMP_DIR_NAME);
   await mkdir(parent, { recursive: true });
   if (sessionID) {
-    const sessionDir = join(parent, sessionID);
+    const sessionDir = join(parent, safePathSegment(sessionID));
     await mkdir(sessionDir, { recursive: true });
-    return sessionDir;
+    if (!turnID) return sessionDir;
+    const turnDir = join(sessionDir, safePathSegment(turnID));
+    await mkdir(turnDir, { recursive: true });
+    return turnDir;
   }
   return parent;
 }
@@ -59,11 +78,14 @@ export async function saveImageToTemp(
   data: Buffer,
   mime: string,
   sessionID?: string,
+  turnID?: string,
+  imageIndex?: number,
 ): Promise<string> {
-  // Chronologically-sortable, human-readable filenames so LLMs can find the
-  // latest image and reproduce the path without copying 36 random hex chars.
-  const tempDir = await ensureTempDir(sessionID);
-  const filename = buildImageFilename(mime);
+  // A turn-scoped canonical filename makes retries idempotent: replaying the
+  // same user message updates the same path instead of creating a confusing
+  // collection of timestamped copies.
+  const tempDir = await ensureTempDir(sessionID, turnID);
+  const filename = buildImageFilename(mime, turnID ? imageIndex : undefined);
   const filepath = join(tempDir, filename);
   await writeFile(filepath, data);
   return filepath;

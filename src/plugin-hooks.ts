@@ -49,17 +49,21 @@ function createVisionModelSystemInstruction(): string {
 
 export function createPluginHooks(input: {
   pluginConfig: PluginConfig;
+  isEnabled: () => boolean | Promise<boolean>;
   log: Logger;
   warn: Logger;
   modelSupportsImageInputBySessionID: Map<string, boolean>;
   client: PluginClient;
+  optiqServerLifecycle?: import("./optiq-server.js").OptiqServerLifecycle;
 }) {
   const {
     pluginConfig,
+    isEnabled,
     log,
     warn,
     modelSupportsImageInputBySessionID,
     client,
+    optiqServerLifecycle,
   } = input;
 
   return {
@@ -71,6 +75,8 @@ export function createPluginHooks(input: {
         () => pluginConfig,
         (context) =>
           modelSupportsImageInputBySessionID.get(context.sessionID) === true,
+        isEnabled,
+        optiqServerLifecycle,
       ),
     },
 
@@ -97,6 +103,11 @@ export function createPluginHooks(input: {
         );
       }
 
+      if (!(await isEnabled())) {
+        log("Image comprehension is disabled from the OpenCode TUI");
+        return;
+      }
+
       await transformMessagesForImageComprehension({
         messages: output.messages,
         config: pluginConfig,
@@ -119,6 +130,7 @@ export function createPluginHooks(input: {
         systemInput.sessionID,
         modelSupportsImageInput,
       );
+      if (!(await isEnabled())) return;
       if (!modelSupportsImageInput) return;
 
       systemOutput.system.push(createVisionModelSystemInstruction());

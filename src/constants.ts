@@ -3,6 +3,8 @@ import type { ActivationMode } from "./types.js";
 // The plugin id is shorter than the npm package name because this is the service
 // name users see in OpenCode logs/tool metadata.
 export const PLUGIN_NAME = "image-comprehension";
+export const TUI_PLUGIN_NAME = "Image Comprehension";
+export const IMAGE_COMPREHENSION_ENABLED_KEY = "plugin_enabled";
 export const TOOL_NAME = "comprehend_image";
 export const CONFIG_FILENAME = "opencode-image-comprehension.json";
 export const TEMP_DIR_NAME = "opencode-image-comprehension";
@@ -12,6 +14,7 @@ export const TEMP_DIR_NAME = "opencode-image-comprehension";
 // multiple images arrive in the same second. This lets LLMs find the latest
 // image and reason about recency from the path alone.
 export const IMAGE_FILENAME_PREFIX = "image-";
+export const CURRENT_IMAGE_FILENAME_PREFIX = "current-image";
 export const IMAGE_FILENAME_PATTERN = `${IMAGE_FILENAME_PREFIX}YYYYMMDD-HHMMSS-xxxxxxxx`;
 export const IMAGE_FILENAME_SHORT_ID_LENGTH = 8;
 
@@ -30,12 +33,23 @@ export const DEFAULT_OLLAMA_CLOUD_URL = "https://ollama.com/api/chat";
 export const DEFAULT_TIMEOUT_SECONDS = 180;
 export const DEFAULT_ACTIVATION_MODE: ActivationMode = "auto";
 export const DEFAULT_IMAGE_PROMPT = "Describe this image in detail";
+export const OMLX_IMAGE_SYSTEM_PROMPT =
+  "You are a helpful assitant whose sole purpose is to read the image provided and respond to the user's quesiton, there is no other purpose for you than this.";
+export const OMLX_THINKING_BUDGET_TOKENS = 1024;
 
 // oMLX provider constants. Used when a project configures provider: "omlx"
 // to use a local oMLX server instead of Ollama Cloud.
 export const DEFAULT_OMLX_URL = "http://localhost:8000/v1/chat/completions";
-export const DEFAULT_OMLX_MODEL = "Ornith-1.0-9B-6bit";
+export const DEFAULT_OMLX_MODEL = "Ornith-1.0-9B-OptiQ-4bit";
 export const DEFAULT_OMLX_API_KEY_ENV = "OMLX_API_KEY";
+export const DEFAULT_OPTIQ_URL = "http://localhost:8080/v1/chat/completions";
+export const DEFAULT_OPTIQ_MODEL = "Ornith-1.0-9B-OptiQ-4bit";
+export const DEFAULT_OPTIQ_API_KEY_ENV = "OPTIQ_API_KEY";
+export const DEFAULT_OPTIQ_SERVER_COMMAND = "optiq";
+export const DEFAULT_OPTIQ_SERVER_HOST = "127.0.0.1";
+export const DEFAULT_OPTIQ_SERVER_PORT = 8080;
+export const DEFAULT_OPTIQ_IDLE_TIMEOUT_SECONDS = 10;
+export const OPTIQ_SERVER_STARTUP_TIMEOUT_SECONDS = 30;
 
 // Supported MIME types are the plugin's public image format contract. Any format
 // added here must also be accepted by local-path validation and documented.

@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        node-version: [20, 22, 24]
+        node-version: [22, 24]
 
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +35,7 @@ jobs:
         run: npm run build
 
       - name: Unit tests
-        run: node --test tests/unit/index.test.mjs
+        run: node --test tests/unit/*.test.mjs
 
       - name: Shell syntax check
         run: bash -n tests/integration/quick-test.sh tests/integration/setup-ci.sh tests/integration/docker-packed-install-test.sh

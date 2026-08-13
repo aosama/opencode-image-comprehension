@@ -5,6 +5,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./server": "./dist/index.js",
+    "./tui": "./dist/tui.js"
+  },
   "files": [
     "dist"
   ],
@@ -13,7 +18,7 @@
     "build": "tsc",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "test:unit": "npm run build && node --test tests/unit/index.test.mjs",
+    "test:unit": "npm run build && node --test tests/unit/*.test.mjs",
     "test:integration:docker": "tests/integration/docker-packed-install-test.sh",
     "prepublishOnly": "npm run build"
   },
@@ -41,10 +46,13 @@
     "@opencode-ai/sdk": ">=1.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/aosama/opencode-image-comprehension"
+  },
+  "dependencies": {
+    "openai": "7.4.0"
   }
 }

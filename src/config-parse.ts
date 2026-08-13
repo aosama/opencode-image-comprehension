@@ -20,10 +20,13 @@ function parseString(value: unknown): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
-function parseProvider(value: unknown): "ollama-cloud" | "omlx" | undefined {
+function parseProvider(
+  value: unknown,
+): "ollama-cloud" | "omlx" | "optiq" | undefined {
   // Keep the provider enum deliberately narrow. Unknown provider values are
   // ignored instead of accepted and failing later in tool execution.
-  if (value === "ollama-cloud" || value === "omlx") return value;
+  if (value === "ollama-cloud" || value === "omlx" || value === "optiq")
+    return value;
   return undefined;
 }
 
@@ -45,6 +48,30 @@ function parseTimeoutSeconds(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const seconds = Math.trunc(value);
   return seconds > 0 ? seconds : undefined;
+}
+
+function parsePositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const integer = Math.trunc(value);
+  return integer > 0 ? integer : undefined;
+}
+
+function parsePort(value: unknown): number | undefined {
+  const port = parsePositiveInteger(value);
+  return port !== undefined && port <= 65_535 ? port : undefined;
+}
+
+function parseOptiqServer(value: unknown): RawPluginConfig["optiqServer"] {
+  if (!value || typeof value !== "object") return undefined;
+  const server = value as Record<string, unknown>;
+  return {
+    managed: typeof server.managed === "boolean" ? server.managed : undefined,
+    command: parseString(server.command),
+    modelPath: parseString(server.modelPath),
+    host: parseString(server.host),
+    port: parsePort(server.port),
+    idleTimeoutSeconds: parsePositiveInteger(server.idleTimeoutSeconds),
+  };
 }
 
 function parseActivationMode(value: unknown): ActivationMode | undefined {
@@ -88,6 +115,7 @@ export function parseConfigObject(raw: unknown): RawPluginConfig {
     apiKeyEnv: parseString(configObject.apiKeyEnv),
     baseUrl: parseBaseUrl(configObject.baseUrl),
     timeoutSeconds: parseTimeoutSeconds(configObject.timeoutSeconds),
+    optiqServer: parseOptiqServer(configObject.optiqServer),
     promptTemplate: parsePromptTemplate(configObject.promptTemplate),
     activation: parseActivationMode(configObject.activation),
   };

@@ -2,12 +2,26 @@ import { tool } from "@opencode-ai/plugin";
 import { DEFAULT_IMAGE_PROMPT } from "./constants.js";
 import { describeImageWithOllamaCloud } from "./providers/ollama-cloud.js";
 import { describeImageWithOmlx } from "./providers/omlx.js";
-import type { PluginConfig } from "./types.js";
+import { describeImageWithOptiq } from "./providers/optiq.js";
+import { readLocalImage } from "./image-materialization.js";
+import type { PluginConfig, PreparedLocalImage } from "./types.js";
+import type { OptiqServerLifecycle } from "./optiq-server.js";
+
+function processedImageMetadata(image: PreparedLocalImage) {
+  return {
+    processed_image_path: image.absolutePath,
+    processed_image_sha256: image.sha256,
+    image_bytes: image.byteLength,
+  };
+}
 
 export function createComprehendImageTool(
   getConfig: () => PluginConfig,
-  shouldBlockForVisionModel: (context: { sessionID: string }) => boolean = () =>
-    false,
+  shouldBlockForVisionModel: (context: {
+    sessionID: string;
+  }) => boolean | Promise<boolean> = () => false,
+  isEnabled: () => boolean | Promise<boolean> = () => true,
+  optiqServerLifecycle?: OptiqServerLifecycle,
 ) {
   // Pass config through a getter instead of capturing a value at module load.
   // OpenCode constructs tools after plugin startup, and tests may also exercise
@@ -38,13 +52,28 @@ export function createComprehendImageTool(
       // job here is execution and validation, not deciding what should be asked
       // about the image.
 
+      if (!(await isEnabled())) {
+        context.metadata({
+          title: "Image Comprehension",
+          metadata: {
+            step: "blocked",
+            reason: "plugin disabled from the OpenCode TUI plugin manager",
+          },
+        });
+        return {
+          output:
+            "Image comprehension is currently disabled in the OpenCode Plugins dialog. Enable the image-comprehension plugin before calling comprehend_image.",
+          metadata: { blocked: true, reason: "plugin-disabled" },
+        };
+      }
+
       // Guard: if this session is using a vision-capable model, refuse and tell
       // the model to look at the image directly. The tool is always registered
       // (the plugin API doesn't support conditional registration), so vision
       // models can see it and may try to call it despite the description saying
       // not to. This guard avoids an unnecessary oMLX round-trip even if host
       // before-hooks do not run for plugin-defined tools.
-      if (shouldBlockForVisionModel(context)) {
+      if (await shouldBlockForVisionModel(context)) {
         context.metadata({
           title: "Image Comprehension",
           metadata: {
@@ -67,18 +96,25 @@ export function createComprehendImageTool(
       // Metadata is surfaced in OpenCode's tool UI/log stream. Keep it concise
       // and non-secret: image path, provider/model identity, and a small prompt
       // preview are enough for debugging without dumping large content.
-      context.metadata({
-        title: "Image Comprehension",
-        metadata: {
-          step: "starting",
-          image: args.image_path,
-          provider: config.provider,
-          model: config.model,
-          prompt: prompt.slice(0, 100),
-        },
-      });
-
+      let preparedImage: PreparedLocalImage | undefined;
       try {
+        preparedImage = await readLocalImage({
+          imagePath: args.image_path,
+          directory: context.directory,
+        });
+        const processedImage = processedImageMetadata(preparedImage);
+        context.metadata({
+          title: "Image Comprehension",
+          metadata: {
+            step: "starting",
+            image: args.image_path,
+            provider: config.provider,
+            model: config.model,
+            prompt: prompt.slice(0, 100),
+            ...processedImage,
+          },
+        });
+
         // context.directory is OpenCode's current project/session directory. It
         // is the correct base for relative paths supplied by the LLM or user.
         // Dispatch to the configured vision provider so the tool stays unaware
@@ -86,13 +122,22 @@ export function createComprehendImageTool(
         const describeImage =
           config.provider === "omlx"
             ? describeImageWithOmlx
-            : describeImageWithOllamaCloud;
-        return await describeImage({
-          imagePath: args.image_path,
-          directory: context.directory,
-          prompt,
-          config,
-        });
+            : config.provider === "optiq"
+              ? describeImageWithOptiq
+              : describeImageWithOllamaCloud;
+        const describeImageJob = () =>
+          describeImage({
+            imagePath: args.image_path,
+            directory: context.directory,
+            prompt,
+            config,
+            preparedImage,
+          });
+        const output =
+          config.provider === "optiq" && optiqServerLifecycle
+            ? await optiqServerLifecycle.run(describeImageJob)
+            : await describeImageJob();
+        return { output, metadata: processedImage };
       } catch (error) {
         // Tool failures should come back as model-readable results so the LLM can
         // recover or explain the failure. Throwing here would surface as a lower
@@ -101,7 +146,10 @@ export function createComprehendImageTool(
           error instanceof Error ? error.message : String(error);
         return {
           output: `Error running image comprehension: ${errorOutput.slice(0, 500)}`,
-          metadata: { error: true },
+          metadata: {
+            error: true,
+            ...(preparedImage ? processedImageMetadata(preparedImage) : {}),
+          },
         };
       }
     },

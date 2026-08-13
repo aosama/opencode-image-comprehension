@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { extname } from "node:path";
 import {
   EXTENSION_TO_MIME,
+  CURRENT_IMAGE_FILENAME_PREFIX,
   IMAGE_FILENAME_PREFIX,
   SUPPORTED_MIME_TYPES,
 } from "./constants.js";
@@ -20,6 +21,7 @@ function isMaterializedImageFilename(filename: string): boolean {
   if (!mime || !SUPPORTED_MIME_TYPES.has(mime)) return false;
   return (
     filename.startsWith(IMAGE_FILENAME_PREFIX) ||
+    filename.startsWith(CURRENT_IMAGE_FILENAME_PREFIX) ||
     LEGACY_UUID_IMAGE_FILENAME_PATTERN.test(filename)
   );
 }

@@ -1,5 +1,11 @@
 import { readLocalImage } from "../image-materialization.js";
-import type { PluginConfig } from "../types.js";
+import {
+  OMLX_IMAGE_SYSTEM_PROMPT,
+  OMLX_THINKING_BUDGET_TOKENS,
+} from "../constants.js";
+import OpenAI from "openai";
+import type { ChatCompletionCreateParamsNonStreaming } from "openai/resources/chat/completions";
+import type { PluginConfig, PreparedLocalImage } from "../types.js";
 
 export function getOmlxApiKey(
   config: PluginConfig,
@@ -25,6 +31,7 @@ export function buildOmlxRequest(input: {
     model: input.model,
     stream: false,
     messages: [
+      { role: "system", content: OMLX_IMAGE_SYSTEM_PROMPT },
       {
         role: "user",
         content: [
@@ -33,6 +40,19 @@ export function buildOmlxRequest(input: {
         ],
       },
     ],
+  };
+}
+
+export function buildOmlxSdkClientOptions(input: {
+  baseUrl: string;
+  apiKey?: string;
+  timeoutSeconds: number;
+}) {
+  return {
+    apiKey: input.apiKey ?? "omlx-local",
+    baseURL: input.baseUrl.replace(/\/chat\/completions\/?$/, ""),
+    maxRetries: 0,
+    timeout: input.timeoutSeconds * 1000,
   };
 }
 
@@ -60,59 +80,54 @@ export async function describeImageWithOmlx(input: {
   directory: string;
   prompt: string;
   config: PluginConfig;
+  preparedImage?: PreparedLocalImage;
 }): Promise<string> {
   // Provider calls are deliberately late-bound: validate/read the local image,
   // construct one oMLX request, and return only textual content to the LLM.
   // The non-vision model never receives raw image bytes.
   const apiKey = getOmlxApiKey(input.config);
-  const requestHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-  };
-  if (apiKey) requestHeaders.Authorization = `Bearer ${apiKey}`;
-
-  const { base64: imageBase64, mime: mimeType } = await readLocalImage({
-    imagePath: input.imagePath,
-    directory: input.directory,
-  });
-  const controller = new AbortController();
-  // Bound both network stalls and slow provider responses with the same timeout
-  // knob exposed in plugin config. AbortController is used instead of racing
-  // promises so fetch can cancel the underlying request.
-  const timeout = setTimeout(
-    () => controller.abort(),
-    input.config.timeoutSeconds * 1000,
+  const preparedImage =
+    input.preparedImage ??
+    (await readLocalImage({
+      imagePath: input.imagePath,
+      directory: input.directory,
+    }));
+  const { base64: imageBase64, mime: mimeType } = preparedImage;
+  const client = new OpenAI(
+    buildOmlxSdkClientOptions({
+      baseUrl: input.config.baseUrl,
+      apiKey,
+      timeoutSeconds: input.config.timeoutSeconds,
+    }),
   );
-
-  try {
-    const response = await fetch(input.config.baseUrl, {
-      method: "POST",
-      headers: requestHeaders,
-      body: JSON.stringify(
-        buildOmlxRequest({
-          model: input.config.model,
-          prompt: input.prompt,
-          imageBase64,
-          mimeType,
-        }),
-      ),
-      signal: controller.signal,
-    });
-
-    const responseText = await response.text();
-    if (!response.ok) {
-      // Include a short body prefix because provider errors often contain the
-      // actionable reason (bad model, bad key, payload too large) in text/JSON.
-      throw new Error(
-        `oMLX request failed with HTTP ${response.status}: ${responseText.slice(0, 500)}`,
-      );
-    }
-
-    const parsedResponse = JSON.parse(responseText) as unknown;
-    const description = parseOmlxDescription(parsedResponse);
-    if (!description)
-      throw new Error("oMLX returned empty or malformed response");
-    return description;
-  } finally {
-    clearTimeout(timeout);
-  }
+  const completionRequest = {
+    model: input.config.model,
+    stream: false,
+    messages: [
+      { role: "system", content: OMLX_IMAGE_SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: input.prompt },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:${mimeType};base64,${imageBase64}`,
+            },
+          },
+        ],
+      },
+    ],
+    // oMLX-specific extension accepted by its OpenAI-compatible endpoint.
+    thinking_budget: OMLX_THINKING_BUDGET_TOKENS,
+  } as ChatCompletionCreateParamsNonStreaming & {
+    thinking_budget: number;
+  };
+  const completion = (await client.chat.completions.create(
+    completionRequest,
+  )) as OpenAI.Chat.Completions.ChatCompletion;
+  const description = completion.choices[0]?.message.content?.trim();
+  if (!description)
+    throw new Error("oMLX returned empty or malformed response");
+  return description;
 }

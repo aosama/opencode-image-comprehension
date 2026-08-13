@@ -103,6 +103,7 @@ export async function transformMessagesForImageComprehension(input: {
     lastUserMessage.parts,
     input.log,
     input.sessionID,
+    lastUserMessage.info.id,
   );
   if (savedImages.length === 0) {
     input.log("No images were successfully saved");

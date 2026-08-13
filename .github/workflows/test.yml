@@ -34,7 +34,7 @@ jobs:
           npm run build
 
       - name: Unit tests
-        run: node --test tests/unit/index.test.mjs
+        run: node --test tests/unit/*.test.mjs
 
       - name: Check cloud integration secret
         id: cloud-secret

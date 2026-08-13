@@ -6,6 +6,13 @@ import {
   DEFAULT_OMLX_API_KEY_ENV,
   DEFAULT_OMLX_MODEL,
   DEFAULT_OMLX_URL,
+  DEFAULT_OPTIQ_API_KEY_ENV,
+  DEFAULT_OPTIQ_IDLE_TIMEOUT_SECONDS,
+  DEFAULT_OPTIQ_MODEL,
+  DEFAULT_OPTIQ_SERVER_COMMAND,
+  DEFAULT_OPTIQ_SERVER_HOST,
+  DEFAULT_OPTIQ_SERVER_PORT,
+  DEFAULT_OPTIQ_URL,
   DEFAULT_OLLAMA_CLOUD_URL,
   DEFAULT_PROVIDER,
   DEFAULT_TIMEOUT_SECONDS,
@@ -61,6 +68,40 @@ export function resolvePluginConfig(
     DEFAULT_PROVIDER,
   );
   const isOmlx = providerResult.value === "omlx";
+  const isOptiq = providerResult.value === "optiq";
+  const optiqServer = {
+    managed: selectWithPrecedence(
+      projectConfig?.optiqServer?.managed,
+      userConfig?.optiqServer?.managed,
+      false,
+    ).value,
+    command: selectWithPrecedence(
+      projectConfig?.optiqServer?.command,
+      userConfig?.optiqServer?.command,
+      DEFAULT_OPTIQ_SERVER_COMMAND,
+    ).value,
+    modelPath: selectWithPrecedence(
+      projectConfig?.optiqServer?.modelPath,
+      userConfig?.optiqServer?.modelPath,
+      DEFAULT_OPTIQ_MODEL,
+    ).value,
+    host: selectWithPrecedence(
+      projectConfig?.optiqServer?.host,
+      userConfig?.optiqServer?.host,
+      DEFAULT_OPTIQ_SERVER_HOST,
+    ).value,
+    port: selectWithPrecedence(
+      projectConfig?.optiqServer?.port,
+      userConfig?.optiqServer?.port,
+      DEFAULT_OPTIQ_SERVER_PORT,
+    ).value,
+    idleTimeoutSeconds: selectWithPrecedence(
+      projectConfig?.optiqServer?.idleTimeoutSeconds,
+      userConfig?.optiqServer?.idleTimeoutSeconds,
+      DEFAULT_OPTIQ_IDLE_TIMEOUT_SECONDS,
+    ).value,
+  };
+  const defaultOptiqUrl = `http://${optiqServer.host}:${optiqServer.port}/v1/chat/completions`;
 
   return {
     provider: providerResult.value,
@@ -72,7 +113,11 @@ export function resolvePluginConfig(
     model: selectWithPrecedence(
       projectConfig?.model ?? projectConfig?.visionModel,
       userConfig?.model ?? userConfig?.visionModel,
-      isOmlx ? DEFAULT_OMLX_MODEL : DEFAULT_VISION_MODEL,
+      isOmlx
+        ? DEFAULT_OMLX_MODEL
+        : isOptiq
+          ? DEFAULT_OPTIQ_MODEL
+          : DEFAULT_VISION_MODEL,
     ).value,
     apiKey: selectWithPrecedence(
       projectConfig?.apiKey,
@@ -82,18 +127,29 @@ export function resolvePluginConfig(
     apiKeyEnv: selectWithPrecedence(
       projectConfig?.apiKeyEnv,
       userConfig?.apiKeyEnv,
-      isOmlx ? DEFAULT_OMLX_API_KEY_ENV : DEFAULT_API_KEY_ENV,
+      isOmlx
+        ? DEFAULT_OMLX_API_KEY_ENV
+        : isOptiq
+          ? DEFAULT_OPTIQ_API_KEY_ENV
+          : DEFAULT_API_KEY_ENV,
     ).value,
     baseUrl: selectWithPrecedence(
       projectConfig?.baseUrl,
       userConfig?.baseUrl,
-      isOmlx ? DEFAULT_OMLX_URL : DEFAULT_OLLAMA_CLOUD_URL,
+      isOmlx
+        ? DEFAULT_OMLX_URL
+        : isOptiq
+          ? projectConfig?.optiqServer || userConfig?.optiqServer
+            ? defaultOptiqUrl
+            : DEFAULT_OPTIQ_URL
+          : DEFAULT_OLLAMA_CLOUD_URL,
     ).value,
     timeoutSeconds: selectWithPrecedence(
       projectConfig?.timeoutSeconds,
       userConfig?.timeoutSeconds,
       DEFAULT_TIMEOUT_SECONDS,
     ).value,
+    optiqServer,
     promptTemplate: selectWithPrecedence(
       projectConfig?.promptTemplate,
       userConfig?.promptTemplate,
@@ -145,12 +201,12 @@ export async function loadPluginConfig(
   const modelResult = selectWithPrecedence(
     projectConfig?.model ?? projectConfig?.visionModel,
     userConfig?.model ?? userConfig?.visionModel,
-    DEFAULT_VISION_MODEL,
+    resolvedConfig.model,
   );
   log(
     modelResult.source !== "default"
       ? `Using vision model from ${modelResult.source} config: ${modelResult.value}`
-      : `Using default vision model: ${DEFAULT_VISION_MODEL}`,
+      : `Using default vision model: ${modelResult.value}`,
   );
 
   log(`Using provider endpoint: ${resolvedConfig.baseUrl}`);

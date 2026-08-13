@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EXTENSION_TO_MIME, SUPPORTED_MIME_TYPES } from "./constants.js";
-import type { ResolvedLocalImage } from "./types.js";
+import type { PreparedLocalImage, ResolvedLocalImage } from "./types.js";
 
 function mimeFromPath(imagePath: string): string | undefined {
   // Self-review note: this is extension-based validation, not byte-sniffing. It
@@ -67,12 +68,17 @@ export async function readLocalImageAsBase64(input: {
 export async function readLocalImage(input: {
   imagePath: string;
   directory: string;
-}): Promise<{ base64: string; mime: string }> {
+}): Promise<PreparedLocalImage> {
   // Like readLocalImageAsBase64 but also returns the MIME type so the oMLX
   // provider can construct a correct data URL for the OpenAI-compatible
   // image_url content part. The existing ollama-cloud provider keeps using
   // readLocalImageAsBase64 unchanged.
   const resolvedImage = await resolveLocalImagePath(input);
   const bytes = await readFile(resolvedImage.absolutePath);
-  return { base64: bytes.toString("base64"), mime: resolvedImage.mime };
+  return {
+    ...resolvedImage,
+    base64: bytes.toString("base64"),
+    byteLength: bytes.byteLength,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
 }

@@ -7,7 +7,9 @@ import {
   TEMP_DIR_NAME,
 } from "./constants.js";
 import { sweepStaleTempImages } from "./image-materialization.js";
+import { readImageComprehensionTuiEnabled } from "./tui-state.js";
 import type { Logger, PluginClient } from "./types.js";
+import { OptiqServerLifecycle } from "./optiq-server.js";
 
 export async function setupImageComprehensionPlugin(input: {
   client: PluginClient;
@@ -34,6 +36,10 @@ export async function setupImageComprehensionPlugin(input: {
   // the same plugin for more than one directory in one process, and module-level
   // config would let later loads change earlier tool instances.
   const pluginConfig = await loadPluginConfig(directory, log);
+  const optiqServerLifecycle =
+    pluginConfig.provider === "optiq"
+      ? new OptiqServerLifecycle(pluginConfig.optiqServer, log)
+      : undefined;
   log(
     `Plugin initialized with ${pluginConfig.provider} model '${pluginConfig.model}'`,
   );
@@ -57,8 +63,10 @@ export async function setupImageComprehensionPlugin(input: {
 
   return {
     pluginConfig,
+    isEnabled: () => readImageComprehensionTuiEnabled(),
     log,
     warn,
     modelSupportsImageInputBySessionID,
+    optiqServerLifecycle,
   };
 }

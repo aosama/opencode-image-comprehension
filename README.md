@@ -8,7 +8,7 @@ When you paste an image in OpenCode while using a model that doesn't support vis
 
 1. You paste an image in OpenCode (using a non-vision model)
 2. Plugin detects the model lacks vision capabilities
-3. Plugin saves the image to a local temp file with a chronologically-sortable, human-readable name (e.g. `image-20260718-151541-31c1519f.png`) so the LLM can find the latest image and reproduce the path reliably
+3. Plugin saves the image to a turn-scoped local temp directory using a canonical name such as `current-image.png` so retries reuse the same path instead of creating confusing duplicates
 4. Plugin strips the image parts from the message (the model can't handle them anyway)
 5. Plugin injects the local image path and explains the `comprehend_image` tool contract
 6. The LLM calls `comprehend_image` with `image_path` and a prompt it chooses
@@ -56,6 +56,31 @@ Pin an exact version when you want reproducible installs and manual upgrades:
 }
 ```
 
+### TUI enable/disable
+
+The server plugin is paired with a small TUI plugin so its runtime state can be
+controlled from OpenCode's **Plugins** dialog. Add the TUI entry to
+`~/.config/opencode/tui.json`:
+
+```json
+{
+  "plugin": [
+    "file:///absolute/path/to/opencode-image-comprehension/dist/tui.js"
+  ]
+}
+```
+
+The companion appears as **Image Comprehension** in the Plugins dialog. The TUI
+plugin manager persists the toggle in OpenCode's state file, and the server
+plugin reads that persisted state before transforming messages, adding native
+vision guidance, or executing `comprehend_image`. Disabled state takes
+precedence over the activation setting. If the state is absent, the plugin is
+enabled for backward compatibility.
+
+The existing capability guard remains in force: when OpenCode reports that the
+active model supports native image input, image parts are left untouched and
+`comprehend_image` refuses the fallback call.
+
 ### Local Development
 
 ```bash
@@ -63,7 +88,7 @@ git clone https://github.com/aosama/opencode-image-comprehension.git
 cd opencode-image-comprehension
 npm install
 npm run build
-ln -sf $(pwd)/dist/index.js ~/.config/opencode/plugin/opencode-image-comprehension.js
+# Keep dist/index.js in opencode.json and dist/tui.js in ~/.config/opencode/tui.json
 ```
 
 ### Packed Install Test
@@ -87,12 +112,13 @@ Create a config file at either location (project config takes precedence):
 
 | Option           | Type       | Default                         | Description                                                                                                     |
 | ---------------- | ---------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `provider`       | `string`   | `"ollama-cloud"`                | Vision provider. `ollama-cloud` (default, Ollama Cloud) or `omlx` (local oMLX server)                           |
-| `model`          | `string`   | `"gemma4:31b"`                  | Vision model to use for image analysis. Defaults to `Ornith-1.0-9B-6bit` when `provider` is `omlx`              |
+| `provider`       | `string`   | `"ollama-cloud"`                | Vision provider. `ollama-cloud` (default), `omlx` (oMLX server), or `optiq` (OptiQ server)                      |
+| `model`          | `string`   | `"gemma4:31b"`                  | Vision model to use for image analysis. OptiQ defaults to `Ornith-1.0-9B-OptiQ-4bit`                            |
 | `apiKey`         | `string`   | _(env)_                         | API key value. Prefer `apiKeyEnv` or environment variables instead of committing this                           |
-| `apiKeyEnv`      | `string`   | `"OLLAMA_CLOUD_API_KEY"`        | Environment variable to read the API key from. Defaults to `OMLX_API_KEY` when `provider` is `omlx`             |
-| `baseUrl`        | `string`   | `"https://ollama.com/api/chat"` | Provider chat endpoint. Defaults to `http://localhost:8000/v1/chat/completions` when `provider` is `omlx`       |
+| `apiKeyEnv`      | `string`   | `"OLLAMA_CLOUD_API_KEY"`        | Environment variable to read the API key from. Defaults to the selected local provider's key variable           |
+| `baseUrl`        | `string`   | `"https://ollama.com/api/chat"` | Provider chat endpoint. Local defaults are port `8000` for oMLX and `8080` for OptiQ                            |
 | `timeoutSeconds` | `number`   | `180`                           | Timeout for image download and provider request                                                                 |
+| `optiqServer`    | `object`   | _(external server)_             | Optional managed OptiQ runner configuration; managed runners gracefully stop after being idle                   |
 | `activation`     | `string`   | `"auto"`                        | Activation mode: `auto`, `force`, `disabled`, or `patterns`                                                     |
 | `models`         | `string[]` | _(unset)_                       | Model glob patterns used by `patterns` mode or as an `auto` fallback when OpenCode metadata is unavailable      |
 | `promptTemplate` | `string`   | _(default prompt)_              | Custom prompt template. Must contain at least one of: `{imageList}`, `{imageCount}`, `{toolName}`, `{userText}` |
@@ -137,11 +163,27 @@ With just that one line, the plugin automatically uses oMLX-appropriate defaults
 
 | Field       | oMLX default                                |
 | ----------- | ------------------------------------------- |
-| `model`     | `Ornith-1.0-9B-6bit`                        |
+| `model`     | `Ornith-1.0-9B-OptiQ-4bit`                  |
 | `baseUrl`   | `http://localhost:8000/v1/chat/completions` |
 | `apiKeyEnv` | `OMLX_API_KEY`                              |
 
-Authentication is optional for oMLX. If your server has API key verification disabled, no key or environment variable is needed and the plugin omits the `Authorization` header. If your server enforces authentication, set `OMLX_API_KEY` or configure `apiKey`/`apiKeyEnv` explicitly.
+Authentication is optional for oMLX. If your server has API key verification
+disabled, no real key or environment variable is needed. Because the official
+OpenAI SDK requires an API-key-shaped value, the plugin sends the harmless local
+placeholder `Bearer omlx-local` when no real key is configured; oMLX ignores it
+when authentication is disabled. If your server enforces authentication, set
+`OMLX_API_KEY` or configure `apiKey`/`apiKeyEnv` explicitly.
+
+The oMLX provider uses OpenAI's official JavaScript SDK (`openai`), pinned to
+the current stable version, against oMLX's OpenAI-compatible
+`/v1/chat/completions` endpoint. The SDK is configured with oMLX's base URL and
+the plugin's timeout; retries are disabled so a provider failure is reported
+once rather than issuing duplicate image requests.
+
+For every oMLX image request, the plugin also sends a focused system message
+and the oMLX `thinking_budget: 1024` extension. The 1024-token limit applies to
+the vision model's reasoning phase; it is separate from the OpenCode chat
+model's reasoning configuration.
 
 Override any oMLX default the same way you would for Ollama Cloud:
 
@@ -153,6 +195,62 @@ Override any oMLX default the same way you would for Ollama Cloud:
   "apiKeyEnv": "MY_OMLX_KEY"
 }
 ```
+
+### Using a local OptiQ server
+
+For OptiQ quants with vision sidecars, use the OptiQ runner instead of oMLX's
+`mlx-vlm` loader. Start the server from the environment where OptiQ is
+installed:
+
+```bash
+optiq serve \
+  --model mlx-community/Ornith-1.0-9B-OptiQ-4bit \
+  --host 127.0.0.1 \
+  --port 8080
+```
+
+Then configure the plugin:
+
+```json
+{
+  "provider": "optiq",
+  "model": "Ornith-1.0-9B-OptiQ-4bit"
+}
+```
+
+By default, OptiQ is externally managed: the plugin connects to an existing
+server and never terminates it. To let this plugin own a dedicated runner,
+enable managed mode. The default idle timeout is 10 seconds:
+
+```json
+{
+  "provider": "optiq",
+  "optiqServer": {
+    "managed": true,
+    "command": "optiq",
+    "modelPath": "/Users/ahmedhamdy/.omlx/models/mlx-community/Ornith-1.0-9B-OptiQ-4bit",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "idleTimeoutSeconds": 10
+  }
+}
+```
+
+In managed mode the plugin starts `optiq serve` on the configured port when
+the first image job arrives, reuses it for concurrent/nearby jobs, and sends
+`SIGTERM` after the configured idle period so OptiQ can release its MLX model
+and GPU buffers. A forced kill is used only if graceful shutdown does not
+finish within five seconds. The plugin never terminates a server when
+`managed` is false. Managed mode also refuses to start when its host and port
+already respond, preventing the plugin from claiming or later terminating an
+externally owned runner. When `baseUrl` is omitted, it is derived from the
+managed `host` and `port`.
+
+The OptiQ provider uses the OpenAI-compatible `/v1/chat/completions` endpoint,
+sends image data as an `image_url` data URL, and does not send oMLX-specific
+extensions. Authentication is optional for local development; the provider
+uses `OPTIQ_API_KEY` when configured and otherwise sends the harmless
+`sk-optiq-local` placeholder.
 
 ## Recommended Vision Models
 
@@ -195,13 +293,13 @@ When processing an image:
 
 ## How Images Are Handled
 
-| Input                                  | How It's Handled                                                    |
-| -------------------------------------- | ------------------------------------------------------------------- |
-| Attached `file://` image               | Converted to a local path and shown to the LLM                      |
-| Attached `data:` image                 | Base64-decoded, saved to a temp file, and shown to the LLM          |
-| Tool `image_path` absolute             | Read directly from the local filesystem                             |
-| Tool `image_path` relative             | Resolved relative to the current OpenCode directory                 |
-| Tool `http://`, `https://`, or `data:` | Rejected; `comprehend_image` intentionally accepts local paths only |
+| Input                                  | How It's Handled                                                                 |
+| -------------------------------------- | -------------------------------------------------------------------------------- |
+| Attached `file://` image               | Converted to a local path and shown to the LLM                                   |
+| Attached `data:` image                 | Base64-decoded, saved to a turn-scoped canonical temp file, and shown to the LLM |
+| Tool `image_path` absolute             | Read directly from the local filesystem                                          |
+| Tool `image_path` relative             | Resolved relative to the current OpenCode directory                              |
+| Tool `http://`, `https://`, or `data:` | Rejected; `comprehend_image` intentionally accepts local paths only              |
 
 ## License
 
